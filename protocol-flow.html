@@ -80,7 +80,7 @@ td.num { font: 0.86rem var(--mono); font-variant-numeric: tabular-nums; white-sp
   <header>
     <section>
       <h1>How an AirPlay song reaches the Raumfeld speakers</h1>
-      <p class="lede">The Pi offers one AirPlay 2 speaker for each Raumfeld room, named after the room. It turns the sound it receives into MP3 web streams and asks the Raumfeld system, over UPnP, to play them. Rooms played to from the same device are joined into one zone, so Raumfeld keeps them in sync. Keys pressed on a speaker travel back to the device that is playing.</p>
+      <p class="lede">The Pi offers one AirPlay 2 speaker for each Raumfeld room, named after the room. It turns the sound it receives into lossless FLAC web streams and asks the Raumfeld system, over UPnP, to play them. Rooms played to from the same device are joined into one zone, so Raumfeld keeps them in sync. Keys pressed on a speaker travel back to the device that is playing.</p>
       <div class="legend">
         <span><i class="swatch audio"></i>sound travelling</span>
         <span><i class="swatch control"></i>commands and lookups</span>
@@ -95,8 +95,8 @@ td.num { font: 0.86rem var(--mono); font-variant-numeric: tabular-nums; white-sp
       <div class="hop">AirPlay 2</div>
       <div class="node"><b>shairport-sync</b><small>On the Pi, one instance per room. Receives, decrypts and decodes to raw samples.</small></div>
       <div class="hop">FIFO, raw PCM</div>
-      <div class="node"><b>Bridge</b><small>On the Pi. Runs the instances, encodes to MP3 with ffmpeg and serves it over HTTP.</small></div>
-      <div class="hop">HTTP, MP3 320k</div>
+      <div class="node"><b>Bridge</b><small>On the Pi. Runs the instances, encodes to FLAC with ffmpeg and serves it over HTTP.</small></div>
+      <div class="hop">HTTP, FLAC</div>
       <div class="node"><b>Raumfeld host</b><small>The Teufel Streamer in the Wohnzimmer. Fetches the stream.</small></div>
       <div class="hop">Raumfeld sync</div>
       <div class="node"><b>Rooms</b><small>Küche One S and Wohnzimmer, kept in time by Raumfeld.</small></div>
@@ -128,13 +128,13 @@ sequenceDiagram
     B->>H: GET :47365/connectRoomToZone or dropRoomJob until one zone holds the selected rooms
     B->>H: GET :47365/listDevices
     H-->>B: address of the zone's renderer
-    B->>H: SOAP SetAVTransportURI with http://pi:8090/stream/ROOM.mp3
+    B->>H: SOAP SetAVTransportURI with http://pi:8090/stream/ROOM.flac
     B->>H: SOAP Play
-    H->>B: GET /stream/ROOM.mp3
+    H->>B: GET /stream/ROOM.flac
     B-->>H: silence at first, so the stream is steady
     S->>A: audio packets
     A->>B: raw PCM into the FIFO
-    B-->>H: endless MP3, as fast as it is produced
+    B-->>H: endless FLAC, as fast as it is produced
     H->>R: distributes the sound, rooms in sync
     Note over S,R: Volume from the sender
     S->>A: volume change
@@ -162,7 +162,7 @@ sequenceDiagram
       <li><span class="tag audio">FIFO</span>Each instance writes decoded samples into its own FIFO under <code>/run/raumfeld-airplay</code>. Volume is left untouched here, so the samples are always full level.</li>
       <li><span class="tag control">Host API</span>The bridge asks the Raumfeld host, on port 47365, which rooms exist, and moves rooms until one zone holds exactly the rooms being played to. A zone is what Raumfeld plays in sync.</li>
       <li><span class="tag control">UPnP</span>Each zone has a virtual player. The bridge hands it the stream address with <code>SetAVTransportURI</code> and sends <code>Play</code>. These are SOAP calls over HTTP, the same ones the Wren app uses.</li>
-      <li><span class="tag audio">HTTP</span>The host fetches the room’s stream, such as <code>/stream/wohnzimmer.mp3</code>, from the Pi like an internet radio station. The stream has no end; ffmpeg encodes the samples as they arrive.</li>
+      <li><span class="tag audio">HTTP</span>The host fetches the room’s stream, such as <code>/stream/wohnzimmer.flac</code>, from the Pi like an internet radio station. The stream has no end; ffmpeg encodes the samples as they arrive. FLAC is lossless, so the speakers get exactly the samples AirPlay delivered. A FLAC stream begins with a header, which the bridge keeps and sends first to anyone who starts fetching later. MP3 at 320 kbit/s remains available as a setting.</li>
       <li><span class="tag audio">Raumfeld</span>From the host onward the sound stays inside Raumfeld’s own system, which keeps the rooms in time with each other.</li>
     </ol>
   </section>
@@ -205,11 +205,12 @@ sequenceDiagram
     <h2>Starting, pausing and recovery</h2>
     <ol class="steps">
       <li><span class="tag control">Volume</span>AirPlay reports volume from −30 dB (quiet) to 0 dB (full). The bridge maps that range to Raumfeld’s 0 to 70 and sets it on that speaker’s room, also inside a shared zone. The cap of 70 is a setting.</li>
+      <li><span class="tag control">Opening volume</span>When a session begins, the speaker wins: for the first 3 seconds the bridge sets the sender’s slider to the room’s current volume instead of the other way round, so a new session never jumps in loudness.</li>
       <li><span class="tag control">Start</span>The metadata feed says when play begins or resumes. The bridge groups the rooms and starts the stream then, before the first sound arrives, and feeds silence until it does.</li>
       <li><span class="tag control">Pause</span>The feed also says when the sender pauses or play ends. The bridge stops the zone at once, so the speakers don’t play out what they had buffered. New sound starts the stream afresh.</li>
       <li><span class="tag control">Quick toggles</span>On a skip or seek the sender reports resume and pause in quick succession. A pause within 1.5 seconds of a resume keeps the stream open instead of restarting it twice.</li>
       <li><span class="tag control">Fallbacks</span>If a report goes missing: 0.4 seconds without samples also counts as a stop, and a session that begins but stays silent is stopped after 8 seconds.</li>
-      <li><span class="tag control">Not ours any more</span>The bridge only stops the zone if it is still playing the bridge’s stream. If someone switched the speakers to another source meanwhile, it leaves them alone.</li>
+      <li><span class="tag control">Not ours any more</span>The bridge only stops the zone if it is still playing the bridge’s stream. If another source such as Spotify took the speakers over meanwhile, it leaves them alone and pauses the sender. The room stays selected in the AirPlay menu, and pressing play on the sender takes the speakers back.</li>
       <li><span class="tag control">Dropped or stalled stream</span>If the speakers stop playing the stream while sound keeps arriving, or fall more than 6 seconds behind in fetching it, the bridge sends <code>SetAVTransportURI</code> and <code>Play</code> again.</li>
       <li><span class="tag control">Finding the host</span>The bridge remembers the host’s address from last time. Only if that fails does it search the network with SSDP.</li>
     </ol>
@@ -239,12 +240,31 @@ sequenceDiagram
         <tbody>
           <tr><td>Pi, shairport-sync</td><td class="num">TCP 7000, 7001, …</td><td>AirPlay 2 sessions, one port per room</td><td><span class="tag audio">sound</span></td></tr>
           <tr><td>Pi, nqptp</td><td class="num">UDP 319, 320</td><td>Clock sync with the sender</td><td><span class="tag control">control</span></td></tr>
-          <tr><td>Pi, bridge</td><td class="num">TCP 8090</td><td>One <code>/stream/ROOM.mp3</code> per room for the speakers; <code>/volume</code>, <code>/event</code> and <code>/status</code> locally</td><td><span class="tag audio">sound</span></td></tr>
+          <tr><td>Pi, bridge</td><td class="num">TCP 8090</td><td>One <code>/stream/ROOM.flac</code> per room for the speakers; <code>/volume</code>, <code>/event</code> and <code>/status</code> locally</td><td><span class="tag audio">sound</span></td></tr>
           <tr><td>Pi, D-Bus</td><td class="num">system bus</td><td>Remote-control commands to each instance: pause, play, AirPlay volume</td><td><span class="tag control">control</span></td></tr>
           <tr><td>Raumfeld host</td><td class="num">TCP 47365</td><td>Rooms and zones: <code>getZones</code>, <code>connectRoomToZone</code>, <code>dropRoomJob</code>, <code>listDevices</code></td><td><span class="tag control">control</span></td></tr>
           <tr><td>Raumfeld host</td><td class="num">TCP, varies</td><td>The zone player’s UPnP control address, read from <code>listDevices</code></td><td><span class="tag control">control</span></td></tr>
           <tr><td>Network</td><td class="num">UDP 1900</td><td>SSDP search for the host, as a fallback</td><td><span class="tag control">control</span></td></tr>
           <tr><td>Network</td><td class="num">UDP 5353</td><td>mDNS announcement of the AirPlay speakers</td><td><span class="tag control">control</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Where the code lives</h2>
+    <p>The bridge is a Python package, <code>raumfeld_airplay</code>, using only the standard library. It is fully typed and checked with <code>mypy --strict</code>, and its rules and protocol code are covered by unit tests. On the Pi it runs as the service <code>raumfeld-airplay</code> from <code>/opt/raumfeld-airplay</code>.</p>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Module</th><th>What it holds</th></tr></thead>
+        <tbody>
+          <tr><td><code>model</code></td><td>The decisions, with no network in them: when a room should play, which rooms share a zone, volume mapping, echoes and key presses.</td></tr>
+          <tr><td><code>bridge</code></td><td>The running program: FIFOs, encoders, the HTTP server, the shairport-sync instances and the watch on the speakers.</td></tr>
+          <tr><td><code>raumfeld</code></td><td>The host’s web service: rooms, zones and finding the host.</td></tr>
+          <tr><td><code>upnp</code></td><td>SOAP calls on a zone’s player and the description of the stream.</td></tr>
+          <tr><td><code>shairport</code></td><td>Each instance’s configuration, its metadata feed and the D-Bus remote commands.</td></tr>
+          <tr><td><code>streaming</code></td><td>The formats, the ffmpeg command and the listeners fetching a stream.</td></tr>
+          <tr><td><code>store</code></td><td>What is remembered across restarts: each room’s identity and the host’s address.</td></tr>
         </tbody>
       </table>
     </div>
