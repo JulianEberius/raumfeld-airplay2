@@ -240,6 +240,7 @@ class Sink:
         self.missing_since = None               # since when the host hasn't listed the room
         self.gone = False                       # the room left: stop playing, then remove the sink
         self.renamed = False                    # its shairport-sync was stopped to take the room's new name
+        self.yielded = False                    # somebody gave the room another source: hands off until the sender plays anew
         self.fifo = os.path.join(run_dir, ident)             # PCM from shairport-sync
         self.meta_fifo = os.path.join(run_dir, ident + ".meta")   # its metadata feed
         self.path = f"/stream/{ident}.mp3"
@@ -266,6 +267,7 @@ class Sink:
         """The sender says play is starting or resuming: expect audio shortly."""
         self.paused_at, self.resumed_at = 0.0, now
         self.session_open, self.session_began = True, now
+        self.yielded = False   # a deliberate play: the room is the sender's again
 
     def pause_reported(self, now, final):
         """The sender says play paused, or (final) ended."""
@@ -279,7 +281,7 @@ class Sink:
     def wants_play(self, now, pause_after, idle_timeout):
         """Whether the room should be playing: audio is arriving, or play has just (re)started and
         its audio is still to come. Never while the sender says it is paused."""
-        if self.paused_at or self.gone:
+        if self.paused_at or self.gone or self.yielded:
             return False
         if now - self.last_audio < pause_after:
             return True
@@ -296,6 +298,8 @@ class Zone:
         self.url = url
         self.restart = False        # the speakers stopped fetching the stream
         self.speaker_state = None   # the transport state the speakers last reported
+        self.located_at = time.monotonic()   # when the rooms' whereabouts were last checked
+        self.strays = set()         # sinks whose rooms weren't with the zone at that check
         self.last_listener = time.monotonic()
 
 
@@ -569,7 +573,8 @@ class Bridge:
     def status(self):
         now = time.monotonic()
         lines = [f"{s.id}: room={s.room_name!r} port={s.port} audio_age={now - s.last_audio:.1f}s session_open={s.session_open} "
-                 f"sender={s.client} volume={s.volume} listeners={len(s.listeners)}" for s in self.sinks.values()]
+                 f"sender={s.client} volume={s.volume} listeners={len(s.listeners)}{' yielded' if s.yielded else ''}"
+                 for s in self.sinks.values()]
         lines += [f"zone {'+'.join(sorted(z.key))}: stream of {z.leader}" for z in self.zones.values()]
         return "\n".join(lines) + "\n"
 
@@ -579,6 +584,7 @@ class Bridge:
         log.info("%s: event %s (last audio %.1fs ago)", sink.id, name, time.monotonic() - sink.last_audio)
         if name == "active-begins":
             sink.session_open, sink.session_began, sink.paused_at = True, time.monotonic(), 0.0
+            sink.yielded = False
         elif name == "active-ends":
             sink.session_open, sink.client = False, None
 
@@ -816,10 +822,27 @@ class Bridge:
     def read_speakers(self, zone):
         """Blocking: the zone's transport state and its rooms' volumes, as the speakers report them."""
         volumes = {ident: zone.renderer.room_volume(self.sinks[ident].room_udn) for ident in zone.key}
-        state = zone.renderer.state()
-        # Stopped although it should be playing: is it still the bridge's stream that is loaded?
-        ours = state not in ("STOPPED", "NO_MEDIA_PRESENT") or zone.renderer.current_uri() == zone.url
-        return state, volumes, ours
+        return zone.renderer.state(), volumes, zone.renderer.current_uri()
+
+    def locate(self, zone):
+        """Blocking: where the zone's rooms are now. Returns the renderer of the Raumfeld zone that holds
+        the leader's room (None if it is in no zone) and the ids of the sinks whose rooms aren't with it."""
+        raumfeld = self.connect()
+        zones, _ = raumfeld.zones()
+        where = {udn: zone_udn for zone_udn, rooms in zones for udn, _ in rooms}
+        home = where.get(self.sinks[zone.leader].room_udn)
+        strays = [ident for ident in zone.key if home is None or where.get(self.sinks[ident].room_udn) != home]
+        return (raumfeld.renderer(home) if home else None), strays
+
+    def let_go(self, zone, idents, reason):
+        """Stops claiming these rooms of the zone: somebody chose something else for them."""
+        for ident in idents:
+            self.sinks[ident].yielded = True
+        log.info("%s: %s; leaving %s alone until the sender plays again", "+".join(sorted(zone.key)), reason,
+                 " + ".join(self.sinks[ident].room_name for ident in sorted(idents)))
+        if set(idents) == set(zone.key):
+            # Nothing of this session is heard any more: have the sender show that.
+            asyncio.ensure_future(self.remote(self.sinks[zone.leader], "Pause"))
 
     async def remote(self, sink, method, *arguments):
         """Sends a remote-control command back to the sink's sender, through shairport-sync's D-Bus interface."""
@@ -840,15 +863,39 @@ class Bridge:
         while True:
             await asyncio.sleep(0.5)
             for zone in list(self.zones.values()):
+                now = time.monotonic()
                 try:
-                    state, volumes, ours = await asyncio.to_thread(self.read_speakers, zone)
+                    state, volumes, uri = await asyncio.to_thread(self.read_speakers, zone)
                 except Exception as error:
                     log.debug("couldn't read the speakers: %s", error)
+                    state = None
+                if self.zones.get(zone.key) is not zone or self.lock.locked():
+                    continue   # stopped, replaced or being rearranged meanwhile
+                if state is None or now - zone.located_at > 3:
+                    # Are the rooms still together? Somebody may have regrouped them, e.g. in the Raumfeld app.
+                    zone.located_at = now
+                    try:
+                        renderer, strays = await asyncio.to_thread(self.locate, zone)
+                    except Exception as error:
+                        log.debug("couldn't locate the rooms: %s", error)
+                        continue
+                    if self.zones.get(zone.key) is not zone or self.lock.locked():
+                        continue
+                    # Acted on only when seen twice in a row: the host's list can be in flux for a moment.
+                    confirmed, zone.strays = zone.strays & set(strays), set(strays)
+                    if confirmed:
+                        self.let_go(zone, confirmed, "rooms were regrouped")
+                        continue
+                    if strays or renderer is None:
+                        continue
+                    zone.renderer = renderer   # the zone's renderer changes when rooms are added to it
+                if state is None:
                     continue
-                if self.zones.get(zone.key) is not zone:
-                    continue   # stopped or replaced meanwhile
-                now = time.monotonic()
                 leader = self.sinks[zone.leader]
+                if uri and uri != zone.url:
+                    self.let_go(zone, zone.key, "the speakers were given another source")
+                    continue
+                ours = True
                 if state != zone.speaker_state:
                     log.info("speakers of %s report state %s (was %s)", "+".join(sorted(zone.key)), state, zone.speaker_state)
                     if state == "PAUSED_PLAYBACK" and zone.speaker_state in ("PLAYING", "TRANSITIONING") \
