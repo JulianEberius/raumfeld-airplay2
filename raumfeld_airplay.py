@@ -427,9 +427,10 @@ class Bridge:
             sink.paused_at = 0.0   # audio long after a reported pause: a resume that wasn't reported
         sink.flushed = False
         sink.stats["bytes"] += len(data)
-        samples = array.array("h", data[:len(data) & ~1][:8192])
-        if samples:
-            sink.stats["peak"] = max(sink.stats["peak"], max(samples), -min(samples))
+        if log.isEnabledFor(logging.DEBUG):   # the level is only reported in the verbose statistics
+            samples = array.array("h", data[:len(data) & ~1][:8192])
+            if samples:
+                sink.stats["peak"] = max(sink.stats["peak"], max(samples), -min(samples))
         self.feed(sink, data)
 
     def on_metadata(self, fd, sink):
@@ -451,10 +452,10 @@ class Bridge:
             now = time.monotonic()
             if code == "clip":
                 if value != sink.client:
-                    log.info("%s: sender is %s", sink.id, value)
+                    log.debug("%s: sender is %s", sink.id, value)
                 sink.client = value or None
                 continue
-            log.info("%s: sender reports %s %s", sink.id, METADATA_NAMES.get(code, code), value[:60])
+            log.debug("%s: sender reports %s %s", sink.id, METADATA_NAMES.get(code, code), value[:60])
             if code == "pbeg":
                 # A new session: the speakers keep the volume they have, and the sender is told it.
                 sink.connected_at, sink.tell_volume, sink.volume = now, True, None
@@ -541,7 +542,7 @@ class Bridge:
         if method == "HEAD":
             return
         listener = Listener(peer[0] if peer else "?")
-        log.info("%s: listener connected: %s", sink.id, listener.peer)
+        log.debug("%s: listener connected: %s", sink.id, listener.peer)
         now = time.monotonic()
         if (sink.paused_at and now - sink.play_asked_at > 3 and not self.lock.locked()
                 and not any(zone.leader == sink.id for zone in self.zones.values())):
@@ -568,7 +569,7 @@ class Bridge:
             for zone in self.zones.values():
                 if zone.leader == sink.id:
                     zone.last_listener = time.monotonic()
-            log.info("%s: listener gone: %s after %d bytes", sink.id, listener.peer, listener.sent)
+            log.debug("%s: listener gone: %s after %d bytes", sink.id, listener.peer, listener.sent)
 
     def status(self):
         now = time.monotonic()
@@ -581,7 +582,7 @@ class Bridge:
     def on_event(self, sink, name):
         """A session event from shairport-sync. Only the "active" pair is acted on: it is debounced
         (active_state_timeout) and fires on pause and resume, unlike play-begins and play-ends."""
-        log.info("%s: event %s (last audio %.1fs ago)", sink.id, name, time.monotonic() - sink.last_audio)
+        log.debug("%s: event %s (last audio %.1fs ago)", sink.id, name, time.monotonic() - sink.last_audio)
         if name == "active-begins":
             sink.session_open, sink.session_began, sink.paused_at = True, time.monotonic(), 0.0
             sink.yielded = False
@@ -649,7 +650,8 @@ class Bridge:
             sink.process = await asyncio.create_subprocess_exec(
                 self.args.shairport, "-c", sink.conf, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
             async for line in sink.process.stdout:
-                log.info("%s: shairport-sync: %s", sink.id, line.decode(errors="replace").rstrip())
+                if line.strip():
+                    log.info("%s: shairport-sync: %s", sink.id, line.decode(errors="replace").rstrip())
             code = await sink.process.wait()
             if sink.renamed:
                 sink.renamed = False
@@ -667,7 +669,7 @@ class Bridge:
         for udn, seen in sorted((details or {}).items(), key=lambda item: item[1][0]):
             name, power, renderers = seen
             if self.seen_rooms.get(udn) != seen:
-                log.info("room %r: power state %s, %d device(s)", name, power, renderers)
+                log.debug("room %r: power state %s, %d device(s)", name, power, renderers)
                 self.seen_rooms[udn] = seen
             sink = by_room.get(udn)
             if not renderers:
@@ -780,6 +782,9 @@ class Bridge:
                 elif not any(leader == zone.leader and key & other for other, leader in plan.items()):
                     try:
                         await asyncio.to_thread(self.stop_zone, zone)
+                    except OSError as error:
+                        # Raumfeld has dissolved the zone already, as when its rooms were regrouped.
+                        log.debug("the zone to stop is gone: %s", error)
                     except Exception as error:
                         log.error("couldn't stop playback: %s", error)
                     # The host can leave its connection open after a stop. Close it, so that it isn't
@@ -807,11 +812,11 @@ class Bridge:
             return
         if sink.connected_at is None or time.monotonic() - sink.connected_at < OPENING_SECONDS:
             # The volume a sender announces as it connects is whatever its slider happened to show.
-            log.info("%s: ignoring the sender's opening volume (AirPlay %.1f)", sink.id, airplay)
+            log.debug("%s: ignoring the sender's opening volume (AirPlay %.1f)", sink.id, airplay)
             return
         fraction = 0.0 if airplay <= -100 else min(max((airplay + 30.0) / 30.0, 0.0), 1.0)
         sink.volume, sink.volume_set_at = round(fraction * self.args.max_volume), time.monotonic()
-        log.info("%s: volume %s (AirPlay %.1f)", sink.id, sink.volume, airplay)
+        log.debug("%s: volume %s (AirPlay %.1f)", sink.id, sink.volume, airplay)
         zone = next((z for z in self.zones.values() if sink.id in z.key), None)
         if zone and sink.room_udn:
             try:
@@ -897,7 +902,7 @@ class Bridge:
                     continue
                 ours = True
                 if state != zone.speaker_state:
-                    log.info("speakers of %s report state %s (was %s)", "+".join(sorted(zone.key)), state, zone.speaker_state)
+                    log.debug("speakers of %s report state %s (was %s)", "+".join(sorted(zone.key)), state, zone.speaker_state)
                     if state == "PAUSED_PLAYBACK" and zone.speaker_state in ("PLAYING", "TRANSITIONING") \
                             and not leader.paused_at:
                         log.info("%s: pause pressed on the speakers; asking the sender to pause", leader.id)
@@ -917,7 +922,7 @@ class Bridge:
                         sink.tell_volume = False
                         airplay = round(-30.0 + 30.0 * min(volume, self.args.max_volume) / self.args.max_volume, 2)
                         sink.told_sender = (airplay, now)
-                        log.info("%s: the speakers are at volume %s; telling the sender", ident, volume)
+                        log.debug("%s: the speakers are at volume %s; telling the sender", ident, volume)
                         asyncio.ensure_future(self.remote(sink, "SetAirplayVolume", "d", f"{airplay:.2f}"))
                         continue
                     # A volume the sender didn't ask for, and not while the sender is still moving its own
@@ -926,7 +931,7 @@ class Bridge:
                             and now - sink.volume_set_at > 2):
                         airplay = round(-30.0 + 30.0 * min(volume, self.args.max_volume) / self.args.max_volume, 2)
                         sink.told_sender = (airplay, now)
-                        log.info("%s: volume changed on the speakers to %s (the sender had set %s); telling the sender",
+                        log.debug("%s: volume changed on the speakers to %s (the sender had set %s); telling the sender",
                                  ident, volume, sink.volume)
                         sink.volume = volume
                         asyncio.ensure_future(self.remote(sink, "SetAirplayVolume", "d", f"{airplay:.2f}"))
@@ -939,7 +944,7 @@ class Bridge:
             if now - self.stats_since >= 5:
                 for sink in self.sinks.values():
                     if sink.stats["bytes"]:
-                        log.info("%s: audio in %d bytes/s (expected %d), peak %d of 32767, listeners %d, backlog %d bytes",
+                        log.debug("%s: audio in %d bytes/s (expected %d), peak %d of 32767, listeners %d, backlog %d bytes",
                                  sink.id, sink.stats["bytes"] / (now - self.stats_since), BYTES_PER_SECOND,
                                  sink.stats["peak"], len(sink.listeners),
                                  max((l.queued for l in sink.listeners), default=0))
@@ -994,9 +999,11 @@ def main():
                         help="seconds a new session may stay silent before the speakers are stopped again")
     parser.add_argument("--no-search", action="store_true", help="never search the network for the host (for tests)")
     parser.add_argument("--title", default="AirPlay")
+    parser.add_argument("--verbose", action="store_true",
+                        help="also log routine events: sender reports, volume steps, listeners, audio statistics")
     parser.add_argument("--state-dir", default="/var/lib/raumfeld-airplay", help="where the host's address and the rooms' identities are kept")
     args = parser.parse_args()
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(message)s")
     asyncio.run(Bridge(args).run())
 
 
