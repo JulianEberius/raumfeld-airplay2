@@ -14,7 +14,9 @@ RuntimeDirectoryMode=0755
 StateDirectory=raumfeld-airplay
 LimitRTPRIO=5
 WorkingDirectory=/opt/raumfeld-airplay
-ExecStart=/usr/bin/python3 -u -m raumfeld_airplay --max-volume 70 --format flac
+# Options such as --max-volume and --format are in this file, as OPTIONS="...".
+EnvironmentFile=-/etc/default/raumfeld-airplay
+ExecStart=/usr/bin/python3 -u -m raumfeld_airplay $OPTIONS
 Restart=on-failure
 RestartSec=5
 
