@@ -1,0 +1,21 @@
+[Unit]
+Description=AirPlay to Raumfeld bridge (one AirPlay speaker per Raumfeld room)
+Wants=network-online.target nqptp.service
+After=network-online.target avahi-daemon.service nqptp.service
+Requires=avahi-daemon.service
+
+[Service]
+Type=simple
+# The bridge runs the shairport-sync instances itself, so it runs as their user.
+User=shairport-sync
+Group=shairport-sync
+RuntimeDirectory=raumfeld-airplay
+RuntimeDirectoryMode=0755
+StateDirectory=raumfeld-airplay
+LimitRTPRIO=5
+ExecStart=/usr/bin/python3 -u /opt/raumfeld-airplay/raumfeld_airplay.py --max-volume 70
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
