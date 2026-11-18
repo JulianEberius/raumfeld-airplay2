@@ -189,7 +189,7 @@ class Bridge:
             stream_of = next((sink for sink in self.sinks.values() if sink.path == path), None)
             sink = self.sinks.get(query.get("sink", ""))
             if stream_of:
-                await self.serve_stream(stream_of, method, writer, peer)
+                await self.serve_stream(stream_of, method, writer, peer, streaming.wants_titles(request))
             elif path == "/volume" and local and sink:      # from volume-hook
                 asyncio.ensure_future(self.sender_set_volume(sink, query.get("airplay", "")))
                 writer.write(NO_CONTENT)
@@ -210,12 +210,13 @@ class Bridge:
         finally:
             writer.close()
 
-    async def serve_stream(self, sink: LiveSink, method: str, writer: asyncio.StreamWriter, peer: str) -> None:
-        writer.write(streaming.stream_response(self.format))
+    async def serve_stream(self, sink: LiveSink, method: str, writer: asyncio.StreamWriter, peer: str,
+                           titles: bool) -> None:
+        writer.write(streaming.stream_response(self.format, titles, self.settings.title))
         if method == "HEAD":
             return
-        listener = Listener(peer, self.format)
-        log.debug("%s: listener connected: %s", sink.id, peer)
+        listener = Listener(peer, self.format, titles)
+        log.debug("%s: listener connected: %s%s", sink.id, peer, ", wants track titles" if titles else "")
         playing = any(zone.leader == sink.id for zone in self.zones.values())
         if not playing and not self.lock.locked() and sink.play_key_pressed(time.monotonic()):
             log.info("%s: play pressed on the speakers; asking the sender to play", sink.id)
@@ -224,6 +225,8 @@ class Bridge:
         try:
             while (data := await listener.queue.get()) is not None:
                 listener.queued -= len(data)
+                if listener.titles:
+                    data = listener.titles.weave(data, sink.now_playing.text(time.monotonic()))
                 writer.write(data)
                 await writer.drain()
                 listener.sent += len(data)
@@ -240,6 +243,7 @@ class Bridge:
         now = time.monotonic()
         lines = [f"{s.id}: room={s.room_name!r} port={s.port} audio_age={now - s.last_audio:.1f}s "
                  f"session_open={s.session_open} sender={s.client} volume={s.volume} listeners={len(s.listeners)}"
+                 f"{' with titles' if any(l.titles for l in s.listeners) else ''} track={s.now_playing.text(now)!r}"
                  f"{' yielded' if s.yielded else ''}" for s in self.sinks.values()]
         lines += [f"zone {'+'.join(sorted(zone.key))}: stream of {zone.leader}" for zone in self.zones.values()]
         return "\n".join(lines) + "\n"

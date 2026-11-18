@@ -232,6 +232,47 @@ class Flac(unittest.TestCase):
         self.assertEqual(listener.queue.get_nowait(), b"anything")
 
 
+class Titles(unittest.TestCase):
+    """Track titles inside the stream, the way internet radio sends them."""
+
+    def test_only_listeners_that_ask_are_sent_titles(self) -> None:
+        asking = b"GET /stream/kueche.flac HTTP/1.1\r\nHost: pi\r\nIcy-MetaData: 1\r\n\r\n"
+        plain = b"GET /stream/kueche.flac HTTP/1.1\r\nHost: pi\r\n\r\n"
+        self.assertTrue(streaming.wants_titles(asking))
+        self.assertFalse(streaming.wants_titles(plain))
+        self.assertIn(b"icy-metaint: 16000\r\n", streaming.stream_response(streaming.FLAC, True, "AirPlay"))
+        self.assertNotIn(b"icy", streaming.stream_response(streaming.FLAC))
+        self.assertIsNone(streaming.Listener("peer", streaming.FLAC).titles)
+
+    def test_block_is_padded_to_units_of_sixteen(self) -> None:
+        block = streaming.icy_block("Ezra Collective - Sweet Echo")
+        self.assertEqual(block[0] * 16, len(block) - 1)
+        self.assertEqual(block[1:].rstrip(b"\0"), b"StreamTitle='Ezra Collective - Sweet Echo';")
+        self.assertEqual(streaming.icy_block(None), b"\0")
+
+    def test_title_cannot_end_the_block_early_or_overflow_it(self) -> None:
+        self.assertEqual(streaming.icy_block("a';b").count(b"';"), 1)
+        long = streaming.icy_block("\u00fc" * 5000)
+        self.assertLessEqual(len(long), 1 + 255 * 16)
+        long[1:].rstrip(b"\0").decode()   # still whole characters
+
+    def test_blocks_fall_at_the_interval_whatever_the_piece_sizes(self) -> None:
+        weaver = streaming.TitleWeaver()
+        audio = bytes(range(256)) * 200   # 51200 bytes: three blocks
+        woven = b"".join(weaver.weave(audio[at:at + 7001], "A - B" if at > 20000 else "")
+                         for at in range(0, len(audio), 7001))
+        recovered, titles, position = b"", [], 0
+        while position < len(woven):
+            recovered += woven[position:position + streaming.ICY_INTERVAL]
+            position += streaming.ICY_INTERVAL
+            if position < len(woven):
+                length = woven[position] * 16
+                titles.append(woven[position + 1:position + 1 + length].rstrip(b"\0"))
+                position += 1 + length
+        self.assertEqual(recovered, audio)
+        self.assertEqual(titles, [b"", b"StreamTitle='A - B';", b""])   # said once, then no news
+
+
 class Identities(unittest.TestCase):
     def test_slug(self) -> None:
         self.assertEqual([slug(name) for name in ("Küche One S", "Wohnzimmer", "2. Stock", "Bad & WC", "")],

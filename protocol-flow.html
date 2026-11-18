@@ -163,6 +163,7 @@ sequenceDiagram
       <li><span class="tag control">Host API</span>The bridge asks the Raumfeld host, on port 47365, which rooms exist, and moves rooms until one zone holds exactly the rooms being played to. A zone is what Raumfeld plays in sync.</li>
       <li><span class="tag control">UPnP</span>Each zone has a virtual player. The bridge hands it the stream address with <code>SetAVTransportURI</code> and sends <code>Play</code>. These are SOAP calls over HTTP, the same ones the Wren app uses.</li>
       <li><span class="tag audio">HTTP</span>The host fetches the room’s stream, such as <code>/stream/wohnzimmer.flac</code>, from the Pi like an internet radio station. The stream has no end; ffmpeg encodes the samples as they arrive. FLAC is lossless, so the speakers get exactly the samples AirPlay delivered. A FLAC stream begins with a header, which the bridge keeps and sends first to anyone who starts fetching later. MP3 at 320 kbit/s remains available as a setting.</li>
+      <li><span class="tag control">Titles</span>shairport-sync reports each track’s title, artist and album in its metadata feed. The host asks for titles when it fetches the stream, as it does with internet radio, so the bridge weaves “artist - title” into the stream every 16,000 bytes when it changes. The Raumfeld app then shows it as the playing track.</li>
       <li><span class="tag audio">Raumfeld</span>From the host onward the sound stays inside Raumfeld’s own system, which keeps the rooms in time with each other.</li>
     </ol>
   </section>

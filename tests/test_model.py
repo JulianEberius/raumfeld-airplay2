@@ -243,6 +243,37 @@ class TheSpeakersPlayKey(unittest.TestCase):
         self.assertFalse(s.play_key_pressed(T + 0.1))
 
 
+class TheTrackThatPlays(unittest.TestCase):
+    def test_details_arrive_one_by_one_and_count_once_settled(self) -> None:
+        s = sink()
+        s.sender_report("asal", "Here Because of Hope", T)
+        s.sender_report("minm", "Sweet Echo", T)
+        s.sender_report("asar", "Ezra Collective", T + 0.01)
+        self.assertEqual(s.now_playing.text(T + 0.02), "")
+        self.assertEqual(s.now_playing.text(T + 1), "Ezra Collective - Sweet Echo")
+
+    def test_next_track_never_mixes_with_the_previous_one(self) -> None:
+        s = sink()
+        s.sender_report("minm", "Sweet Echo", T)
+        s.sender_report("asar", "Ezra Collective", T)
+        s.now_playing.text(T + 1)
+        s.sender_report("minm", "So What", T + 60)
+        self.assertEqual(s.now_playing.text(T + 60.1), "Ezra Collective - Sweet Echo")
+        s.sender_report("asar", "Miles Davis", T + 60.2)
+        self.assertEqual(s.now_playing.text(T + 61), "Miles Davis - So What")
+
+    def test_title_alone_is_enough(self) -> None:
+        s = sink()
+        s.sender_report("minm", "Tagesschau", T)
+        self.assertEqual(s.now_playing.text(T + 1), "Tagesschau")
+
+    def test_end_of_play_clears_it(self) -> None:
+        s = sink()
+        s.sender_report("minm", "Sweet Echo", T)
+        s.sender_report("pend", "", T + 5)
+        self.assertEqual(s.now_playing.text(T + 6), "")
+
+
 class RoomsComeAndGo(unittest.TestCase):
     def test_room_is_given_a_grace_period(self) -> None:
         s = sink()

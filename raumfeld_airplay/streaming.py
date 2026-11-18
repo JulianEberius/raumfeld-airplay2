@@ -30,6 +30,12 @@ FLAC = Format("flac", "audio/flac", "http-get:*:audio/flac:*",
               ("-c:a", "flac", "-compression_level", "5", "-f", "flac"), 120_000, True)
 FORMATS = {fmt.name: fmt for fmt in (MP3, FLAC)}
 
+# Internet radio's way of naming the track inside the stream ("ICY"), for listeners that ask for it:
+# after every ICY_INTERVAL bytes of audio comes a block that is empty or holds the new title.
+ICY_REQUEST = "icy-metadata"
+ICY_INTERVAL = 16_000
+ICY_TITLE_BYTES = 480
+
 FLAC_MARKER = b"fLaC"
 FLAC_FRAME_SYNC = b"\xff\xf8"   # how a frame of a fixed-blocksize FLAC stream starts
 
@@ -38,9 +44,50 @@ def stream_path(ident: str, fmt: Format) -> str:
     return f"/stream/{ident}.{fmt.name}"
 
 
-def stream_response(fmt: Format) -> bytes:
+def stream_response(fmt: Format, titles: bool = False, name: str = "") -> bytes:
+    """The start of the answer to a request for a stream; `titles` if track titles will be woven in."""
+    icy = f"icy-metaint: {ICY_INTERVAL}\r\nicy-name: {name}\r\n" if titles else ""
     return (f"HTTP/1.1 200 OK\r\nContent-Type: {fmt.content_type}\r\nCache-Control: no-cache\r\n"
-            "Connection: close\r\nAccept-Ranges: none\r\n\r\n").encode()
+            f"{icy}Connection: close\r\nAccept-Ranges: none\r\n\r\n").encode()
+
+
+def wants_titles(request: bytes) -> bool:
+    """Whether an HTTP request asks for track titles inside the stream."""
+    for line in request.split(b"\r\n")[1:]:
+        name, _, value = line.partition(b":")
+        if name.strip().lower() == ICY_REQUEST.encode():
+            return value.strip() == b"1"
+    return False
+
+
+def icy_block(title: str | None) -> bytes:
+    """A title block: a length byte counting units of 16 bytes, then the padded text. None for no news."""
+    if title is None:
+        return b"\0"
+    text = title.replace("';", "'\u200a;").encode()[:ICY_TITLE_BYTES].decode(errors="ignore")   # whole characters only
+    body = f"StreamTitle='{text}';".encode()
+    units = -(-len(body) // 16)
+    return bytes([units]) + body.ljust(units * 16, b"\0")
+
+
+class TitleWeaver:
+    """Weaves title blocks into one listener's stream."""
+
+    def __init__(self) -> None:
+        self._until_block = ICY_INTERVAL
+        self._told = ""
+
+    def weave(self, data: bytes, title: str) -> bytes:
+        """`data` with the blocks that fall into it; `title` goes into the first one after it changed."""
+        pieces: list[bytes] = []
+        while len(data) >= self._until_block:
+            pieces.append(data[:self._until_block])
+            data = data[self._until_block:]
+            pieces.append(icy_block(title if title != self._told else None))
+            self._told, self._until_block = title, ICY_INTERVAL
+        self._until_block -= len(data)
+        pieces.append(data)
+        return b"".join(pieces)
 
 
 def silence(seconds: float) -> bytes:
@@ -78,8 +125,9 @@ def flac_header_length(data: bytes) -> int | None:
 class Listener:
     """One HTTP connection fetching a stream."""
 
-    def __init__(self, peer: str, fmt: Format) -> None:
+    def __init__(self, peer: str, fmt: Format, titles: bool = False) -> None:
         self.peer = peer
+        self.titles = TitleWeaver() if titles else None   # set if it asked for track titles
         self.queue: asyncio.Queue[bytes | None] = asyncio.Queue()
         self.queued = 0   # bytes waiting to be sent
         self.sent = 0

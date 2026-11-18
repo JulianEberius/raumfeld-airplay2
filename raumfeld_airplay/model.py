@@ -23,6 +23,8 @@ ECHO_TOLERANCE = 0.06
 UNREPORTED_RESUME_SECONDS = 1.0
 # The speakers' play key is acted on at most this often.
 PLAY_KEY_SECONDS = 3.0
+# A track's title, artist and album arrive one by one; they count once nothing changed this long.
+TRACK_SETTLE_SECONDS = 0.5
 
 AIRPLAY_QUIET = -30.0   # AirPlay volume runs from -30 dB (quiet) to 0 dB (full); -144 dB is mute
 AIRPLAY_MUTE = -100.0
@@ -39,6 +41,35 @@ def airplay_to_volume(airplay: float, max_volume: int) -> int:
 def volume_to_airplay(volume: int, max_volume: int) -> float:
     """A Raumfeld volume as an AirPlay volume in dB; anything above `max_volume` is full."""
     return round(AIRPLAY_QUIET - AIRPLAY_QUIET * min(volume, max_volume) / max_volume, 2)
+
+
+class NowPlaying:
+    """The track the sender says it is playing."""
+
+    FIELDS = {"minm": "title", "asar": "artist", "asal": "album"}   # the metadata feed's codes
+
+    def __init__(self) -> None:
+        self.title = self.artist = self.album = ""
+        self._changed_at = 0.0
+        self._settled = ""
+
+    def report(self, code: str, value: str, now: float) -> None:
+        """One of the track's details, as the sender reports it."""
+        field = self.FIELDS[code]
+        if getattr(self, field) != value:
+            setattr(self, field, value)
+            self._changed_at = now
+
+    def clear(self, now: float) -> None:
+        for code in self.FIELDS:
+            self.report(code, "", now)
+
+    def text(self, now: float) -> str:
+        """The track in one line, "artist - title", as internet radio announces it. While details
+        are still arriving this is the previous track, so that the two never get mixed."""
+        if now - self._changed_at >= TRACK_SETTLE_SECONDS:
+            self._settled = " - ".join(part for part in (self.artist, self.title) if part)
+        return self._settled
 
 
 class Sink:
@@ -63,6 +94,7 @@ class Sink:
         self.client: str | None = None   # the sender's address, once its metadata feed has told it
         self.yielded = False             # somebody gave the room another source: hands off until the sender plays anew
         self.play_asked_at = 0.0         # when the sender was last asked to play, after the speakers' play key
+        self.now_playing = NowPlaying()
         # volume, on Raumfeld's 0-100 scale
         self.volume: int | None = None   # what the sender last asked for, or what the speakers had when it connected
         self.volume_set_at = 0.0         # when the sender last set it
@@ -91,8 +123,11 @@ class Sink:
             self.paused_at = now
 
     def sender_report(self, code: str, value: str, now: float) -> None:
-        """An item from the metadata feed: clip (sender's address), pbeg, pres, paus, pend."""
-        if code == "clip":
+        """An item from the metadata feed: clip (sender's address), pbeg, pres, paus, pend, and the
+        track's title, artist and album."""
+        if code in NowPlaying.FIELDS:
+            self.now_playing.report(code, value, now)
+        elif code == "clip":
             self.client = value or None
         elif code == "pbeg":
             # A new session: the speakers keep the volume they have, and the sender is told it.
@@ -104,6 +139,7 @@ class Sink:
             self.pause_reported(now, final=False)
         elif code == "pend":
             self.connected_at = None
+            self.now_playing.clear(now)
             self.pause_reported(now, final=True)
 
     def session_event(self, name: str, now: float) -> None:

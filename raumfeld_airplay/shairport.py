@@ -18,7 +18,8 @@ DBUS_REMOTE = "org.gnome.ShairportSync.RemoteControl"
 # The metadata feed's items the bridge acts on, by their four-letter codes.
 SENDER_ADDRESS = "clip"
 REPORTS = {"pbeg": "play begins", "pres": "resume", "paus": "pause", "pend": "play ends",
-           "pfls": "flush", "snam": "name", SENDER_ADDRESS: "address"}
+           "pfls": "flush", "snam": "name", SENDER_ADDRESS: "address",
+           "minm": "title", "asar": "artist", "asal": "album"}
 
 _ITEM = re.compile(rb'<item><type>([0-9a-f]{8})</type><code>([0-9a-f]{8})</code><length>\d+</length>'
                    rb'(?:\s*<data encoding="base64">\s*([^<]*)</data>)?\s*</item>')
