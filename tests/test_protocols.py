@@ -146,7 +146,7 @@ class UPnP(unittest.TestCase):
         self.assertIn(b"<InstanceID>0</InstanceID><Room>uuid:kitchen</Room>", body)
 
     def test_stream_metadata_escapes(self) -> None:
-        didl = upnp.stream_didl("http://pi:8090/stream/a.mp3?x=1&y=2", "Rock & Roll")
+        didl = upnp.stream_didl("http://pi:8090/stream/a.mp3?x=1&y=2", "Rock & Roll", streaming.MP3.protocol_info)
         self.assertIn("Rock &amp; Roll", didl)
         self.assertIn("x=1&amp;y=2", didl)
         self.assertIn("audio/mpeg", didl)
@@ -193,15 +193,43 @@ class Streaming(unittest.TestCase):
         self.assertEqual(len(streaming.silence(0.5)) % 4, 0)
 
     def test_listener_that_falls_behind_is_refused(self) -> None:
-        listener = streaming.Listener("192.168.0.65")
+        listener = streaming.Listener("192.168.0.65", streaming.MP3)
         chunk = bytes(8192)
         accepted = 0
         while listener.offer(chunk):
             accepted += 1
-        self.assertGreater(accepted * len(chunk), streaming.BACKLOG_LIMIT)
+        self.assertGreater(accepted * len(chunk), 6 * streaming.MP3.bytes_per_second)
         listener.abandon()
         self.assertEqual(listener.queued, 0)
         self.assertIsNone(listener.queue.get_nowait(), "told to hang up")
+
+
+class Flac(unittest.TestCase):
+    # "fLaC", a STREAMINFO block (type 0, 34 bytes) and a last block (type 4 with the last-flag, 8 bytes)
+    HEADER = b"fLaC" + b"\x00\x00\x00\x22" + bytes(34) + b"\x84\x00\x00\x08" + bytes(8)
+    FRAME = b"\xff\xf8" + bytes(100)
+
+    def test_header_length(self) -> None:
+        self.assertEqual(streaming.flac_header_length(self.HEADER + self.FRAME), len(self.HEADER))
+        self.assertIsNone(streaming.flac_header_length(self.HEADER[:20]), "not all of it yet")
+        self.assertIsNone(streaming.flac_header_length(self.HEADER[:-1]))
+        with self.assertRaises(ValueError):
+            streaming.flac_header_length(b"ID3\x04" + bytes(40))
+
+    def test_listener_joining_late_gets_the_header_and_starts_at_a_frame(self) -> None:
+        listener = streaming.Listener("192.168.0.65", streaming.FLAC)
+        self.assertTrue(listener.offer(self.FRAME), "no header known yet: wait")
+        self.assertTrue(listener.offer(bytes(50), self.HEADER), "the middle of a frame: wait")
+        self.assertTrue(listener.queue.empty())
+        listener.offer(self.FRAME, self.HEADER)
+        self.assertEqual(listener.queue.get_nowait(), self.HEADER + self.FRAME)
+        listener.offer(bytes(50), self.HEADER)
+        self.assertEqual(listener.queue.get_nowait(), bytes(50), "once started, everything is passed on")
+
+    def test_mp3_listener_needs_no_header(self) -> None:
+        listener = streaming.Listener("192.168.0.65", streaming.MP3)
+        listener.offer(b"anything")
+        self.assertEqual(listener.queue.get_nowait(), b"anything")
 
 
 class Identities(unittest.TestCase):

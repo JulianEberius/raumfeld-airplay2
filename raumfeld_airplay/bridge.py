@@ -48,19 +48,21 @@ class Settings:
     grace: float = 60.0             # seconds a room may be missing before its AirPlay speaker is removed
     discover_interval: float = 10.0  # seconds between looks at the rooms
     title: str = "AirPlay"          # what the speakers show as playing
+    format: str = "mp3"             # what the speakers are sent: one of streaming.FORMATS
 
 
 class LiveSink(Sink):
     """A sink with what it takes to run it: its shairport-sync, FIFOs, encoder and listeners."""
 
-    def __init__(self, identity: Identity, room: Room, run_dir: str) -> None:
+    def __init__(self, identity: Identity, room: Room, run_dir: str, fmt: streaming.Format) -> None:
         super().__init__(identity.id, room.udn, room.name)
         self.port = identity.port
         self.offset = identity.offset
         self.fifo = os.path.join(run_dir, identity.id)                  # PCM from shairport-sync
         self.metadata_fifo = os.path.join(run_dir, identity.id + ".meta")
         self.conf = os.path.join(run_dir, identity.id + ".conf")
-        self.path = streaming.stream_path(identity.id)
+        self.path = streaming.stream_path(identity.id, fmt)
+        self.stream_header = b""    # what the encoder's output began with, for formats that have a header
         self.metadata = shairport.MetadataFeed()
         self.process: asyncio.subprocess.Process | None = None   # its shairport-sync
         self.encoder: asyncio.subprocess.Process | None = None   # its ffmpeg
@@ -91,6 +93,7 @@ class Bridge:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.store = Store(settings.state_dir, settings.airplay_port, settings.first_offset)
+        self.format = streaming.FORMATS[settings.format]
         self.sinks: dict[str, LiveSink] = {}            # one per room the Raumfeld host lists
         self.zones: dict[frozenset[str], Zone] = {}
         self.seen_rooms: dict[str, Room] = {}           # rooms as last listed, for the log
@@ -142,7 +145,7 @@ class Bridge:
 
     def broadcast(self, sink: LiveSink, data: bytes) -> None:
         for listener in list(sink.listeners):
-            if not listener.offer(data):
+            if not listener.offer(data, sink.stream_header):
                 log.warning("%s: listener %s stopped reading; dropping it", sink.id, listener.peer)
                 sink.listeners.discard(listener)
                 listener.abandon()
@@ -154,9 +157,20 @@ class Bridge:
         """Keeps the sink's ffmpeg running and passes what it produces on to the listeners."""
         while True:
             sink.encoder = await asyncio.create_subprocess_exec(
-                *streaming.encoder_command(), stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE)
+                *streaming.encoder_command(self.format), stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE)
             assert sink.encoder.stdout
-            while data := await sink.encoder.stdout.read(8192):
+            sink.stream_header, beginning = b"", b""
+            # Large reads, so that what is passed on begins where the encoder began a frame.
+            while data := await sink.encoder.stdout.read(65536):
+                if self.format.has_header and not sink.stream_header:
+                    # Listeners can join at any time, and each needs the header the stream began with.
+                    beginning += data
+                    length = streaming.flac_header_length(beginning)
+                    if length is None:
+                        continue
+                    sink.stream_header, data = beginning[:length], beginning[length:]
+                    if not data:
+                        continue
                 self.broadcast(sink, data)
             log.error("%s: the encoder stopped (%s); restarting it", sink.id, await sink.encoder.wait())
             await asyncio.sleep(1)
@@ -197,10 +211,10 @@ class Bridge:
             writer.close()
 
     async def serve_stream(self, sink: LiveSink, method: str, writer: asyncio.StreamWriter, peer: str) -> None:
-        writer.write(streaming.STREAM_RESPONSE)
+        writer.write(streaming.stream_response(self.format))
         if method == "HEAD":
             return
-        listener = Listener(peer)
+        listener = Listener(peer, self.format)
         log.debug("%s: listener connected: %s", sink.id, peer)
         playing = any(zone.leader == sink.id for zone in self.zones.values())
         if not playing and not self.lock.locked() and sink.play_key_pressed(time.monotonic()):
@@ -233,7 +247,7 @@ class Bridge:
     # ------------------------------------------------------------ rooms come and go
 
     def add_sink(self, room: Room) -> None:
-        sink = LiveSink(self.store.identity(room.udn, room.name), room, self.settings.run_dir)
+        sink = LiveSink(self.store.identity(room.udn, room.name), room, self.settings.run_dir, self.format)
         loop = asyncio.get_running_loop()
         for path, handler in ((sink.fifo, self.on_audio), (sink.metadata_fifo, self.on_metadata)):
             fd = self.open_fifo(path)
@@ -355,7 +369,7 @@ class Bridge:
                 renderer.set_room_volume(sink.room_udn, sink.volume)
         # A zone that just gained or lost a room may still be playing the stream: leave it be then.
         if force or renderer.current_uri() != url or renderer.state() not in PLAYING_STATES:
-            renderer.play_stream(url, self.settings.title)
+            renderer.play_stream(url, self.settings.title, self.format.protocol_info)
         log.info("playing %s's stream on %s", leader, " + ".join(sink.room_name for sink in sinks))
         return Zone(key, leader, renderer, url)
 

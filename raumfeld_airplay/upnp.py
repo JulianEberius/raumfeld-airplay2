@@ -12,7 +12,6 @@ from xml.sax.saxutils import escape
 
 AV_TRANSPORT = "urn:schemas-upnp-org:service:AVTransport:1"
 RENDERING_CONTROL = "urn:schemas-upnp-org:service:RenderingControl:1"
-MP3_PROTOCOL_INFO = "http-get:*:audio/mpeg:DLNA.ORG_PN=MP3;DLNA.ORG_OP=00;DLNA.ORG_FLAGS=01700000000000000000000000000000"
 PLAYING_STATES = ("PLAYING", "TRANSITIONING")
 STOPPED_STATES = ("STOPPED", "NO_MEDIA_PRESENT")
 PAUSED_STATE = "PAUSED_PLAYBACK"
@@ -73,14 +72,14 @@ def control_urls(description: bytes, location: str) -> dict[str, str]:
     return urls
 
 
-def stream_didl(url: str, title: str) -> str:
-    """DIDL-Lite metadata for an endless MP3 stream."""
+def stream_didl(url: str, title: str, protocol_info: str) -> str:
+    """DIDL-Lite metadata for an endless stream; `protocol_info` says what it is encoded as."""
     return ('<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" '
             'xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/">'
             '<item id="airplay" parentID="0" restricted="1">'
             f'<dc:title>{escape(title)}</dc:title>'
             '<upnp:class>object.item.audioItem.audioBroadcast</upnp:class>'
-            f'<res protocolInfo="{escape(MP3_PROTOCOL_INFO)}">{escape(url)}</res></item></DIDL-Lite>')
+            f'<res protocolInfo="{escape(protocol_info)}">{escape(url)}</res></item></DIDL-Lite>')
 
 
 class Renderer:
@@ -102,8 +101,9 @@ class Renderer:
             raise UPnPError(f"{action} failed: {error}") from None
         return soap_outputs(data, action)
 
-    def play_stream(self, url: str, title: str) -> None:
-        self.call(AV_TRANSPORT, "SetAVTransportURI", InstanceID=0, CurrentURI=url, CurrentURIMetaData=stream_didl(url, title))
+    def play_stream(self, url: str, title: str, protocol_info: str) -> None:
+        self.call(AV_TRANSPORT, "SetAVTransportURI", InstanceID=0, CurrentURI=url,
+                  CurrentURIMetaData=stream_didl(url, title, protocol_info))
         self.call(AV_TRANSPORT, "Play", InstanceID=0, Speed=1)
 
     def stop(self) -> None:

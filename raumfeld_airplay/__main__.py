@@ -8,6 +8,7 @@ import dataclasses
 import logging
 import os
 
+from . import streaming
 from .bridge import Bridge, Settings
 
 
@@ -34,6 +35,7 @@ def parse(arguments: list[str] | None = None) -> tuple[Settings, bool]:
         help="seconds a room may be missing before its AirPlay speaker is removed")
     add("--discover-interval", type=float, default=defaults.discover_interval, help="seconds between looks at the rooms")
     add("--title", default=defaults.title, help="what the speakers show as playing")
+    add("--format", default=defaults.format, choices=sorted(streaming.FORMATS), help="what the speakers are sent")
     add("--verbose", action="store_true",
         help="also log routine events: sender reports, volume steps, listeners, audio statistics")
     values = vars(parser.parse_args(arguments))
