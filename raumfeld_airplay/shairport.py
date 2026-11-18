@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """shairport-sync, the AirPlay 2 receiver, as the bridge uses it: one instance per room.
 
 nqptp, the clock it shares with AirPlay 2 senders, is run alongside: one for all instances.

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """AirPlay to Raumfeld bridge: one AirPlay 2 speaker per Raumfeld room.
 
     model      the decision rules, free of I/O

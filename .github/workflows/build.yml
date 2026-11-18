@@ -41,6 +41,9 @@ jobs:
           /opt/raumfeld-airplay/bin/nqptp -V
           cd /opt/raumfeld-airplay && python3 -m raumfeld_airplay --version
           getent passwd raumfeld-airplay
+          test -s /usr/share/doc/raumfeld-airplay/third-party/nqptp/LICENSE
+          test -s /usr/share/doc/raumfeld-airplay/third-party/shairport-sync/LICENSES
+          grep -c Copyright /usr/share/doc/raumfeld-airplay/third-party/shairport-sync/source-file-notices.txt
       - name: Name the upload
         id: name
         run: echo "name=$(basename dist/*.deb .deb)" >> "$GITHUB_OUTPUT"
@@ -58,10 +61,13 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
-      - run: gh release create "$GITHUB_REF_NAME" dist/*.deb --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
+      - name: The source of the programs inside the packages, to publish with them
+        run: packaging/source-archives.sh
+      - run: gh release create "$GITHUB_REF_NAME" dist/*.deb dist/*-source.tar.gz --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}

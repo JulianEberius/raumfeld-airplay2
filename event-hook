@@ -1,3 +1,4 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Called by shairport-sync on session events: event-hook <sink> <event>
 exec curl -s -m 3 -o /dev/null "http://127.0.0.1:8090/event?sink=$1&name=$2"

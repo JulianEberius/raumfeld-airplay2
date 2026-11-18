@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """What the bridge keeps between runs: where the Raumfeld host is, and each room's identity.
 
 A room's identity is what a sender recognises its AirPlay speaker by: its AirPlay device ID

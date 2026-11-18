@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Builds the Debian package: the bridge together with its own copies of shairport-sync and
 # nqptp, so that installing it needs no compiler and touches nothing else on the machine.
 #
@@ -10,10 +11,6 @@
 #   BUILD_CACHE   where the built programs are kept between runs (default: .build)
 set -euo pipefail
 
-SHAIRPORT_VERSION=5.6.3     # needs 5 or later: D-Bus name tags, several instances side by side
-NQPTP_VERSION=1.2.9
-SHAIRPORT_SOURCE=https://github.com/mikebrady/shairport-sync.git
-NQPTP_SOURCE=https://github.com/mikebrady/nqptp.git
 BUILD_PACKAGES="git ca-certificates build-essential autoconf automake libtool pkg-config xxd dpkg-dev
     libpopt-dev libconfig-dev libavahi-client-dev libssl-dev libglib2.0-dev
     libplist-dev libplist-utils libsodium-dev libgcrypt20-dev uuid-dev
@@ -22,6 +19,8 @@ BUILD_PACKAGES="git ca-certificates build-essential autoconf automake libtool pk
 RUN_DEPENDS="python3 (>= 3.11), ffmpeg, curl, avahi-daemon, dbus, systemd, adduser"
 
 root=$(cd "$(dirname "$0")/.." && pwd)
+# shellcheck source=packaging/versions.sh
+. "$root/packaging/versions.sh"
 cache=${BUILD_CACHE:-$root/.build}
 say() { printf '\n== %s\n' "$*"; }
 fail() { printf 'build-deb.sh: %s\n' "$*" >&2; exit 1; }
@@ -90,8 +89,38 @@ strip "$app/bin/nqptp" "$app/bin/shairport-sync"
 install -m 644 "$root/raumfeld-airplay.service" "$pkg/usr/lib/systemd/system/"
 install -m 644 "$root/packaging/dbus-policy.conf" "$pkg/usr/share/dbus-1/system.d/raumfeld-airplay.conf"
 install -m 644 "$root/README.md" "$pkg/usr/share/doc/raumfeld-airplay/"
-sed -e "s/@SHAIRPORT_VERSION@/$SHAIRPORT_VERSION/" -e "s/@NQPTP_VERSION@/$NQPTP_VERSION/" \
-    "$root/packaging/copyright" >"$pkg/usr/share/doc/raumfeld-airplay/copyright"
+doc=$pkg/usr/share/doc/raumfeld-airplay
+sed -e "s/@SHAIRPORT_VERSION@/$SHAIRPORT_VERSION/g" -e "s/@NQPTP_VERSION@/$NQPTP_VERSION/g" \
+    "$root/packaging/copyright" >"$doc/copyright"
+
+# The licences of the two programs, which ask to travel with them. shairport-sync's are partly
+# in its source files' opening comments, so those are collected, each distinct one once.
+shairport=$cache/shairport-sync-$SHAIRPORT_VERSION
+install -d "$doc/third-party/shairport-sync" "$doc/third-party/nqptp"
+install -m 644 "$cache/nqptp-$NQPTP_VERSION/LICENSE" "$doc/third-party/nqptp/"
+install -m 644 "$shairport/LICENSES" "$doc/third-party/shairport-sync/"
+install -m 644 "$shairport/tinyhttp/LICENSE" "$doc/third-party/shairport-sync/LICENSE.tinyhttp"
+notices=$work/notices
+mkdir "$notices"
+(cd "$shairport" && find . \( -name '*.c' -o -name '*.h' -o -name '*.cpp' \) | sed 's|^\./||' | sort) |
+while read -r file; do
+    notice=$(awk 'NR == 1 && !/^\/\*/ { exit } { print } /\*\// { exit }' "$shairport/$file")
+    case $notice in *[Cc]opyright*|*[Ll]icen[sc]e*) ;; *) continue ;; esac
+    hash=$(printf '%s' "$notice" | sha1sum | cut -c1-40)
+    printf '%s\n' "$notice" >"$notices/$hash.notice"
+    printf '  %s\n' "$file" >>"$notices/$hash.files"
+done
+{
+    echo "The opening comments of shairport-sync $SHAIRPORT_VERSION's source files: their copyright notices and"
+    echo "licence terms. Files that share a comment are listed together."
+    for files in "$notices"/*.files; do
+        printf '\n%s\n' "------------------------------------------------------------------------"
+        cat "$files"
+        echo
+        cat "${files%.files}.notice"
+    done
+} >"$doc/third-party/shairport-sync/source-file-notices.txt"
+[ "$(wc -l <"$doc/third-party/shairport-sync/source-file-notices.txt")" -gt 100 ] || fail "couldn't collect shairport-sync's notices"
 install -m 755 "$root/packaging/postinst" "$root/packaging/prerm" "$root/packaging/postrm" "$pkg/DEBIAN/"
 
 # The libraries the two programs are linked against, as package dependencies.

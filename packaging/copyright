@@ -1,15 +1,32 @@
-This package contains the AirPlay to Raumfeld bridge and, unmodified and built from their
-published sources, two programs it runs:
+AirPlay to Raumfeld bridge
+  Copyright (C) 2026 Julian Eberius
 
-shairport-sync @SHAIRPORT_VERSION@
-  Copyright (c) Mike Brady and contributors
-  Source and licence terms: https://github.com/mikebrady/shairport-sync
-  (tag @SHAIRPORT_VERSION@; see LICENSES and COPYING there)
+  This program is free software: you can redistribute it and/or modify it under the terms of
+  the GNU General Public License as published by the Free Software Foundation, either version
+  3 of the License, or (at your option) any later version.
 
-nqptp @NQPTP_VERSION@
-  Copyright (c) Mike Brady
-  Source: https://github.com/mikebrady/nqptp (tag @NQPTP_VERSION@)
-  Licensed under the GNU General Public License, version 2. On Debian systems its text is in
-  /usr/share/common-licenses/GPL-2.
+  This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+  without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+  See the GNU General Public License for more details.
 
-How the package is built from those sources: packaging/build-deb.sh in the bridge's repository.
+  On Debian systems the licence's text is in /usr/share/common-licenses/GPL-3.
+
+This package also contains two separate programs that the bridge runs. Both are unmodified and
+built from their published sources; packaging/build-deb.sh in the bridge's repository is how.
+Their source code, as built, is published next to the packages on the bridge's releases page.
+
+shairport-sync @SHAIRPORT_VERSION@   /opt/raumfeld-airplay/bin/shairport-sync
+  Copyright (c) 2014-2026 Mike Brady and the Shairport Sync contributors
+  Copyright (c) 2011-2013 James Laird (Shairport), and others
+  https://github.com/mikebrady/shairport-sync, tag @SHAIRPORT_VERSION@
+  MIT licence, with parts under other permissive licences. The full notices are in
+  third-party/shairport-sync/ next to this file.
+
+nqptp @NQPTP_VERSION@   /opt/raumfeld-airplay/bin/nqptp
+  Copyright (c) 2021-2022 Mike Brady
+  https://github.com/mikebrady/nqptp, tag @NQPTP_VERSION@
+  GNU General Public License, version 2. Its text is in third-party/nqptp/LICENSE next to
+  this file.
+
+AirPlay is a trademark of Apple Inc. Raumfeld and Teufel are trademarks of Lautsprecher Teufel
+GmbH. This project is not affiliated with, endorsed by or supported by either company.

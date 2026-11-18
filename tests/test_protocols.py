@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """The protocol modules against what the real devices sent and expect."""
 
 import base64

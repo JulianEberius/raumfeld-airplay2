@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """The bridge's decision rules, free of any I/O.
 
 When a room should play, how rooms group into zones, and whose volume counts. Everything here

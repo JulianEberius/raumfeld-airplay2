@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """Command line: python3 -m raumfeld_airplay"""
 
 from __future__ import annotations

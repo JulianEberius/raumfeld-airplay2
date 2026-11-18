@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
 """A stand-in for a Raumfeld system, for trying the bridge without real speakers.
 
 It answers the host's web service on port 47365 (rooms, zones, devices) and plays the part of

@@ -1,3 +1,4 @@
 #!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Called by shairport-sync as: volume-hook <sink> <AirPlay volume, -30..0 dB, -144 = mute>
 exec curl -s -m 3 -o /dev/null "http://127.0.0.1:8090/volume?sink=$1&airplay=$2"

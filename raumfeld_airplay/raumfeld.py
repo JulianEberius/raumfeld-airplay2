@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """The Raumfeld host: the device that runs the system and knows its rooms and zones.
 
 It is found over SSDP and answers plain HTTP requests on port 47365. A zone is a set of rooms

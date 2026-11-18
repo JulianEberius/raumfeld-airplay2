@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """The decision rules, as scenarios. Each one is something that happened on the real speakers."""
 
 import unittest

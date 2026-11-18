@@ -13,6 +13,9 @@ Linux machine on the same network, such as a Raspberry Pi.
 
 How it works is described in `protocol-flow.html`.
 
+This is a private, non-commercial project. It is not affiliated with, endorsed by or supported
+by Apple or Lautsprecher Teufel; see [Licence](#licence).
+
 ## Install
 
 Download the package for your system from the
@@ -118,3 +121,32 @@ real speakers; its first lines say how.
 
 A tag like `v1.0.0` (matching `__version__`) makes GitHub build the packages and publish them as a
 release; every push to `main` builds them as downloadable artifacts of the run.
+
+Releases also carry the source code of shairport-sync and nqptp as the packages were built from
+it; `packaging/source-archives.sh` writes those archives.
+
+## Licence
+
+Copyright (C) 2026 Julian Eberius
+
+This program is free software: you can redistribute it and/or modify it under the terms of the
+GNU General Public License as published by the Free Software Foundation, either version 3 of
+the License, or (at your option) any later version. It is distributed in the hope that it will
+be useful, but without any warranty; without even the implied warranty of merchantability or
+fitness for a particular purpose. The licence's text is in [LICENSE](LICENSE).
+
+The packages contain two separate programs, unmodified, which the bridge runs:
+
+| Program | Licence | Source |
+|---|---|---|
+| [shairport-sync](https://github.com/mikebrady/shairport-sync) by Mike Brady and contributors, based on Shairport by James Laird | MIT, with parts under other permissive licences | tag 5.6.3 |
+| [nqptp](https://github.com/mikebrady/nqptp) by Mike Brady | GNU General Public License, version 2 | tag 1.2.9 |
+
+Their full licence texts and copyright notices are installed with the package, in
+`/usr/share/doc/raumfeld-airplay/`, and their source code is attached to each release.
+
+The bridge runs `ffmpeg` and uses Python, Avahi, D-Bus and systemd as the system provides them;
+they are not part of the packages.
+
+AirPlay is a trademark of Apple Inc. Raumfeld and Teufel are trademarks of Lautsprecher Teufel
+GmbH. The names are used here only to say what the software works with.

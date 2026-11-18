@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Builds the bridge's package from this checkout and installs it, for working on the bridge or
 # for a system there is no ready-made package for. Otherwise, install a released package:
 #

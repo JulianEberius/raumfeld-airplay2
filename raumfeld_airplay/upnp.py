@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """The parts of UPnP AV the Raumfeld speakers need: SOAP actions on a media renderer, the
 DIDL-Lite description of a stream, and the HTTP underneath. All calls block."""
 

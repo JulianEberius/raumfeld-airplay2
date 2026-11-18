@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """The bridge: ties the AirPlay side (one shairport-sync per room) to the Raumfeld side.
 
 It keeps a sink for every room the Raumfeld host lists, moves each sink's audio from its FIFO

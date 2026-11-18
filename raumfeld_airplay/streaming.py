@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 """The audio on its way to the speakers: raw PCM from shairport-sync, encoded to an endless
 stream that the Raumfeld host fetches over HTTP like an internet radio station."""
 
