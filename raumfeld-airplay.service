@@ -13,7 +13,8 @@ RuntimeDirectory=raumfeld-airplay
 RuntimeDirectoryMode=0755
 StateDirectory=raumfeld-airplay
 LimitRTPRIO=5
-ExecStart=/usr/bin/python3 -u /opt/raumfeld-airplay/raumfeld_airplay.py --max-volume 70
+WorkingDirectory=/opt/raumfeld-airplay
+ExecStart=/usr/bin/python3 -u -m raumfeld_airplay --max-volume 70
 Restart=on-failure
 RestartSec=5
 
