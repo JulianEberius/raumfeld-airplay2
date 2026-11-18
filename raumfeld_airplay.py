@@ -38,6 +38,7 @@ log = logging.getLogger("raumfeld-airplay")
 RATE, CHANNELS, BITS = 44100, 2, 16
 BYTES_PER_SECOND = RATE * CHANNELS * BITS // 8
 MP3_BYTES_PER_SECOND = 40_000   # 320 kbit/s
+OPENING_SECONDS = 3.0           # how long after a session begins the sender's volume counts as its opening one
 PROTOCOL_INFO = "http-get:*:audio/mpeg:DLNA.ORG_PN=MP3;DLNA.ORG_OP=00;DLNA.ORG_FLAGS=01700000000000000000000000000000"
 AVT = "urn:schemas-upnp-org:service:AVTransport:1"
 RC = "urn:schemas-upnp-org:service:RenderingControl:1"
@@ -252,6 +253,8 @@ class Sink:
         self.client = None           # the sender's IP address, once the metadata feed has told it
         self.volume = None           # last volume asked for over AirPlay (0-100 Raumfeld scale)
         self.volume_set_at = 0.0     # when the sender last set the volume
+        self.connected_at = None     # when the sender began its play session; None between sessions
+        self.tell_volume = False     # the sender is still to be told the speakers' volume, as the session opens
         self.speaker_volume = None   # the room's volume as the speakers last reported it
         self.play_asked_at = 0.0     # when the sender was last asked to play, after a press of the speakers' key
         self.told_sender = None      # (AirPlay volume, time) last passed on to the sender from the speakers' keys
@@ -448,6 +451,11 @@ class Bridge:
                 sink.client = value or None
                 continue
             log.info("%s: sender reports %s %s", sink.id, METADATA_NAMES.get(code, code), value[:60])
+            if code == "pbeg":
+                # A new session: the speakers keep the volume they have, and the sender is told it.
+                sink.connected_at, sink.tell_volume, sink.volume = now, True, None
+            elif code == "pend":
+                sink.connected_at = None
             if code in ("pbeg", "pres"):
                 sink.play_reported(now)
             elif code in ("paus", "pend"):
@@ -791,6 +799,10 @@ class Bridge:
         if sink.told_sender and abs(airplay - sink.told_sender[0]) < 0.06 and time.monotonic() - sink.told_sender[1] < 3:
             sink.told_sender = None   # the echo of a volume that came from the speakers: they already have it
             return
+        if sink.connected_at is None or time.monotonic() - sink.connected_at < OPENING_SECONDS:
+            # The volume a sender announces as it connects is whatever its slider happened to show.
+            log.info("%s: ignoring the sender's opening volume (AirPlay %.1f)", sink.id, airplay)
+            return
         fraction = 0.0 if airplay <= -100 else min(max((airplay + 30.0) / 30.0, 0.0), 1.0)
         sink.volume, sink.volume_set_at = round(fraction * self.args.max_volume), time.monotonic()
         log.info("%s: volume %s (AirPlay %.1f)", sink.id, sink.volume, airplay)
@@ -854,6 +866,13 @@ class Bridge:
                     if sink.volume is None:
                         sink.volume = volume   # not set by a sender yet: what the speakers have counts
                     sink.speaker_volume = volume
+                    if sink.tell_volume and volume is not None:
+                        sink.tell_volume = False
+                        airplay = round(-30.0 + 30.0 * min(volume, self.args.max_volume) / self.args.max_volume, 2)
+                        sink.told_sender = (airplay, now)
+                        log.info("%s: the speakers are at volume %s; telling the sender", ident, volume)
+                        asyncio.ensure_future(self.remote(sink, "SetAirplayVolume", "d", f"{airplay:.2f}"))
+                        continue
                     # A volume the sender didn't ask for, and not while the sender is still moving its own
                     # slider: the speakers' volume keys.
                     if (volume is not None and sink.volume is not None and volume != sink.volume
