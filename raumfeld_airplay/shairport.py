@@ -1,5 +1,7 @@
 """shairport-sync, the AirPlay 2 receiver, as the bridge uses it: one instance per room.
 
+nqptp, the clock it shares with AirPlay 2 senders, is run alongside: one for all instances.
+
 An instance is driven through its documented interfaces. Its configuration file names the
 speaker and where things go; it writes PCM into one FIFO and a metadata feed into another;
 it calls hook commands on session and volume events; and it takes remote-control commands
@@ -90,6 +92,11 @@ class MetadataFeed:
             items.append((code, value))
         self._buffer = self._buffer[end:]
         return items
+
+
+def nqptp_ports_taken(output: str) -> bool:
+    """Whether what nqptp printed as it gave up says that its ports are in use: by another nqptp."""
+    return "unable to listen on port" in output and "98" in output   # 98: address already in use
 
 
 def remote_command(tag: str, method: str, *arguments: str) -> list[str]:

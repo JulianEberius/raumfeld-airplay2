@@ -1,0 +1,67 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python3 -m unittest discover -s tests -t .
+      - run: pip install mypy && mypy raumfeld_airplay tests
+      - name: The tag is the version in the code
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: test "v$(python3 -m raumfeld_airplay --version)" = "$GITHUB_REF_NAME"
+
+  package:
+    # One package per system and processor: the programs inside are linked against that system's libraries.
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        system: ["debian:13", "debian:12"]
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.system }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the package
+        run: packaging/build-deb.sh --install-build-packages
+      - name: Install it and run what is inside
+        run: |
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends ./dist/raumfeld-airplay_*.deb
+          /opt/raumfeld-airplay/bin/shairport-sync -V
+          /opt/raumfeld-airplay/bin/nqptp -V
+          cd /opt/raumfeld-airplay && python3 -m raumfeld_airplay --version
+          getent passwd raumfeld-airplay
+      - name: Name the upload
+        id: name
+        run: echo "name=$(basename dist/*.deb .deb)" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.name.outputs.name }}
+          path: dist/*.deb
+          if-no-files-found: error
+
+  release:
+    # A tag like v1.0.0 publishes the packages as a release.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - run: gh release create "$GITHUB_REF_NAME" dist/*.deb --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}

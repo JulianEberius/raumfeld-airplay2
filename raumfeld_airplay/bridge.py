@@ -36,7 +36,8 @@ class Settings:
     run_dir: str = "/run/raumfeld-airplay"       # the sinks' FIFOs and configuration files
     state_dir: str = "/var/lib/raumfeld-airplay"  # the host's address and the rooms' identities
     hook_dir: str = "/opt/raumfeld-airplay"       # where event-hook and volume-hook are
-    shairport: str = "/usr/local/bin/shairport-sync"
+    shairport: str = "shairport-sync"             # the shairport-sync to run, one instance per room
+    nqptp: str = ""                 # the nqptp to run for them; none if empty, for a machine that runs its own
     port: int = 8090                # HTTP: streams for the speakers, hooks and status locally
     airplay_port: int = 7000        # port of the first room's AirPlay speaker
     first_offset: int = 0           # first AirPlay device ID offset to hand out
@@ -294,6 +295,31 @@ class Bridge:
                 sink.renamed = False
                 continue   # stopped by the bridge to take the room's new name
             log.error("%s: shairport-sync stopped (%s); starting it again", sink.id, code)
+            await asyncio.sleep(1 if time.monotonic() - started > 30 else 5)
+
+    async def run_nqptp(self) -> None:
+        """Keeps nqptp running: the clock that AirPlay 2 senders and shairport-sync share. There is
+        one per machine, so if another is already running, that one serves and this only watches."""
+        yielding = False
+        while True:
+            started = time.monotonic()
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    self.settings.nqptp, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+            except OSError as error:
+                log.error("can't run nqptp (%s): %s; AirPlay 2 won't work without it", self.settings.nqptp, error)
+                return
+            assert process.stdout
+            output = (await process.stdout.read()).decode(errors="replace").strip()
+            code = await process.wait()
+            if shairport.nqptp_ports_taken(output) and time.monotonic() - started < 5:
+                if not yielding:
+                    log.info("another nqptp is running on this machine; using that one")
+                yielding = True
+                await asyncio.sleep(30)
+                continue
+            yielding = False
+            log.error("nqptp stopped (%s) %s; starting it again", code, output[-300:])
             await asyncio.sleep(1 if time.monotonic() - started > 30 else 5)
 
     def update_rooms(self, rooms: dict[str, Room] | None, now: float) -> None:
@@ -586,6 +612,8 @@ class Bridge:
         server = await asyncio.start_server(self.handle_http, "0.0.0.0", self.settings.port)
         log.info("serving on port %d; looking for Raumfeld rooms", self.settings.port)
         async with server:
+            if self.settings.nqptp:
+                asyncio.ensure_future(self.run_nqptp())
             asyncio.ensure_future(self.discover())
             asyncio.ensure_future(self.observe())
             await self.supervise()

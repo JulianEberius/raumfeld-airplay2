@@ -1,0 +1,20 @@
+#!/bin/sh
+set -e
+if [ "$1" = configure ]; then
+    if ! getent passwd raumfeld-airplay >/dev/null; then
+        adduser --system --group --no-create-home --home /nonexistent --quiet raumfeld-airplay
+    fi
+    if [ ! -f /etc/default/raumfeld-airplay ]; then
+        cat >/etc/default/raumfeld-airplay <<'OPTIONS'
+# Options of the AirPlay to Raumfeld bridge. For the list: cd /opt/raumfeld-airplay && python3 -m raumfeld_airplay --help
+# After a change: sudo systemctl restart raumfeld-airplay
+OPTIONS="--format flac"
+OPTIONS
+    fi
+    if [ -d /run/systemd/system ]; then
+        systemctl daemon-reload
+        systemctl reload dbus 2>/dev/null || true
+        systemctl enable --quiet raumfeld-airplay
+        systemctl restart raumfeld-airplay || true
+    fi
+fi

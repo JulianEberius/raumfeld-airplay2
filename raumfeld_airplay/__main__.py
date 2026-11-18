@@ -8,12 +8,20 @@ import dataclasses
 import logging
 import os
 
-from . import streaming
+from . import __version__, streaming
 from .bridge import Bridge, Settings
 
 
+def bundled(home: str, program: str, otherwise: str) -> str:
+    """The copy of `program` that is installed with the bridge, if there is one."""
+    path = os.path.join(home, "bin", program)
+    return path if os.access(path, os.X_OK) else otherwise
+
+
 def parse(arguments: list[str] | None = None) -> tuple[Settings, bool]:
-    defaults = Settings(hook_dir=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    home = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    defaults = Settings(hook_dir=home, shairport=bundled(home, "shairport-sync", Settings.shairport),
+                        nqptp=bundled(home, "nqptp", Settings.nqptp))
     parser = argparse.ArgumentParser(prog="raumfeld_airplay",
                                      description="AirPlay to Raumfeld bridge: one AirPlay speaker per Raumfeld room.")
     add = parser.add_argument
@@ -21,6 +29,8 @@ def parse(arguments: list[str] | None = None) -> tuple[Settings, bool]:
     add("--state-dir", default=defaults.state_dir, help="where the host's address and the rooms' identities are kept")
     add("--hook-dir", default=defaults.hook_dir, help="where event-hook and volume-hook are")
     add("--shairport", default=defaults.shairport, help="the shairport-sync to run")
+    add("--nqptp", default=defaults.nqptp,
+        help="the nqptp to run; empty to run none, on a machine that runs its own")
     add("--port", type=int, default=defaults.port, help="HTTP port the speakers fetch the streams from")
     add("--airplay-port", type=int, default=defaults.airplay_port, help="port of the first room's AirPlay speaker")
     add("--first-offset", type=int, default=defaults.first_offset, help="first AirPlay device ID offset to hand out")
@@ -36,6 +46,7 @@ def parse(arguments: list[str] | None = None) -> tuple[Settings, bool]:
     add("--discover-interval", type=float, default=defaults.discover_interval, help="seconds between looks at the rooms")
     add("--title", default=defaults.title, help="what the speakers show as playing")
     add("--format", default=defaults.format, choices=sorted(streaming.FORMATS), help="what the speakers are sent")
+    parser.add_argument("--version", action="version", version=__version__)
     add("--verbose", action="store_true",
         help="also log routine events: sender reports, volume steps, listeners, audio statistics")
     values = vars(parser.parse_args(arguments))

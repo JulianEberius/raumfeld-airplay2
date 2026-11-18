@@ -1,18 +1,21 @@
 [Unit]
 Description=AirPlay to Raumfeld bridge (one AirPlay speaker per Raumfeld room)
-Wants=network-online.target nqptp.service
-After=network-online.target avahi-daemon.service nqptp.service
+Wants=network-online.target
+# nqptp.service: a machine that runs its own nqptp gets to start it first; the bridge then uses it.
+After=network-online.target avahi-daemon.service dbus.service nqptp.service
 Requires=avahi-daemon.service
 
 [Service]
 Type=simple
-# The bridge runs the shairport-sync instances itself, so it runs as their user.
-User=shairport-sync
-Group=shairport-sync
+User=raumfeld-airplay
+Group=raumfeld-airplay
 RuntimeDirectory=raumfeld-airplay
 RuntimeDirectoryMode=0755
 StateDirectory=raumfeld-airplay
-LimitRTPRIO=5
+# The bridge runs nqptp, which listens on the PTP ports 319 and 320.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+LimitRTPRIO=6
+PrivateTmp=yes
 WorkingDirectory=/opt/raumfeld-airplay
 # Options such as --max-volume and --format are in this file, as OPTIONS="...".
 EnvironmentFile=-/etc/default/raumfeld-airplay

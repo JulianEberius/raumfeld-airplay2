@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload || true
+fi
+if [ "$1" = purge ]; then
+    rm -rf /etc/default/raumfeld-airplay /var/lib/raumfeld-airplay
+    if getent passwd raumfeld-airplay >/dev/null; then
+        deluser --system --quiet raumfeld-airplay || true
+    fi
+fi

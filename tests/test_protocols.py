@@ -187,6 +187,16 @@ class Shairport(unittest.TestCase):
                           "/org/gnome/ShairportSync", "org.gnome.ShairportSync.RemoteControl", "SetAirplayVolume", "d", "-15.00"])
 
 
+class Nqptp(unittest.TestCase):
+    def test_another_nqptp_is_told_from_a_real_failure(self) -> None:
+        # What nqptp 1.2.9 printed on the Pi with a second one running, and without permission.
+        taken = 'fatal error: nqptp is unable to listen on port 319. The error is: 98, "Address already in use".'
+        denied = "fatal error: nqptp does not have permission to access port 319. It must (a) [Linux only] have ..."
+        self.assertTrue(shairport.nqptp_ports_taken(taken))
+        self.assertFalse(shairport.nqptp_ports_taken(denied))
+        self.assertFalse(shairport.nqptp_ports_taken(""))
+
+
 class Streaming(unittest.TestCase):
     def test_silence_is_whole_frames(self) -> None:
         self.assertEqual(len(streaming.silence(0.05)), 8820)
