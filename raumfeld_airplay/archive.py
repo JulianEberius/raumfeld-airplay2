@@ -31,22 +31,23 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Protocol
 
+from .shairport import PIPE_AHEAD
 from .streaming import CHANNELS, PCM_BYTES_PER_SECOND, RATE
 
 log = logging.getLogger("raumfeld-airplay")
 
 EXTENSION = ".flac"
 # A track in any of these formats counts as archived already.
-ARCHIVED_EXTENSIONS = (".flac", ".m4a", ".alac", ".mp3", ".opus", ".ogg", ".aiff", ".aif", ".wav")
+ARCHIVED_EXTENSIONS = (".flac", ".m4a", ".m4p", ".alac", ".mp3", ".opus", ".ogg", ".aiff", ".aif", ".wav")
 START_TOLERANCE = 2.0    # seconds of a track's beginning that may be missing from a recording
 END_TOLERANCE = 2.0      # seconds of its end
 SEEK_TOLERANCE = 2.0     # a record whose elapsed time is this far off from what was heard means a seek
 WAIT_FOR_RECORD = 10.0   # seconds of audio past a track's end kept while the next track's record is awaited
 CLOCK_SLACK = 0.3        # how far the audio's clock may lag behind when audio arrived
-# shairport-sync writes audio into its pipe this long before the sender plays it. Measured on
-# the Pi from an archived album: each file ended with 0.85-0.9 s of the next track, which began
-# right after the previous track's trailing silence.
-AUDIO_LEAD = 0.9
+# How long before the sender plays it audio arrives from shairport-sync's pipe. shairport-sync
+# keeps the pipe PIPE_AHEAD (1 s) ahead; measured on the Pi from an archived album, each file
+# ended with 0.85-0.9 s of the next track, which began right after the previous one's silence.
+AUDIO_LEAD = PIPE_AHEAD - 0.1
 FRAME = 4                # bytes per stereo sample
 NOW_PLAYING = "kMRMediaRemoteNowPlayingInfo"
 

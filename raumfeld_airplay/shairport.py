@@ -28,6 +28,11 @@ _ITEM = re.compile(rb'<item><type>([0-9a-f]{8})</type><code>([0-9a-f]{8})</code>
                    rb'(?:\s*<data encoding="base64">\s*([^<]*)</data>)?\s*</item>')
 
 
+# How far ahead of playing it shairport-sync writes audio into the pipe. 1.0 is its own default
+# for pipes; it is set here so that the archive's timing doesn't change with that default.
+PIPE_AHEAD = 1.0
+
+
 def configuration(name: str, port: int, device_id_offset: int, tag: str, fifo: str, metadata_fifo: str,
                   hook_dir: str) -> str:
     """The configuration file of one instance: the AirPlay speaker `name`, whose audio goes into `fifo`.
@@ -42,6 +47,7 @@ general =
 	dbus_nametag = "{tag}";
 	output_backend = "pipe";
 	ignore_volume_control = "yes";
+	audio_backend_buffer_desired_length_in_seconds = {PIPE_AHEAD};
 	run_this_when_volume_is_set = "{hook_dir}/volume-hook {tag}";
 }};
 sessioncontrol =

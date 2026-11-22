@@ -89,8 +89,10 @@ DIRECTORY/Artist/Album/NN Title.flac
 ```
 
 tagged with title, artist, album, track number, genre and composer, with the cover embedded and
-saved next to it as `cover.jpg`. Tracks already in the archive, as FLAC, M4A, MP3, Opus, Ogg,
-AIFF or WAV, are skipped. Tracks that were skipped, seeked in or only partly heard are not kept;
+saved next to it as `cover.jpg`. Tracks already in the archive, as FLAC, M4A (also protected
+M4P from old iTunes purchases), MP3, Opus, Ogg, AIFF or WAV, are skipped. The layout is the one
+the Music app and iTunes use for their folders, so the archive can share a folder with a library
+exported from them. Tracks that were skipped, seeked in or only partly heard are not kept;
 pausing is fine. Off unless the option is given.
 
 The directory must be writable by the service's user, `raumfeld-airplay`:
