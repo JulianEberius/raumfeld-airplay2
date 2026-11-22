@@ -69,6 +69,7 @@ OPTIONS="--max-volume 70 --format flac"
 | `--format flac\|mp3` | flac, as installed | What the speakers are sent |
 | `--host ADDRESS` | found over SSDP | The Raumfeld host's IP address |
 | `--grace SECONDS` | 60 | How long a room may be missing before its AirPlay speaker is removed |
+| `--archive DIRECTORY` | off | Archive every track heard whole; see [Archive](#archive) |
 | `--verbose` | off | Also log routine events |
 
 `cd /opt/raumfeld-airplay && python3 -m raumfeld_airplay --help` lists all of them. After a
@@ -77,6 +78,35 @@ change:
 ```bash
 sudo systemctl restart raumfeld-airplay
 ```
+
+## Archive
+
+With `--archive DIRECTORY` the bridge also keeps a private archive of what plays: every track
+heard from start to end is written to
+
+```
+DIRECTORY/Artist/Album/NN Title.flac
+```
+
+tagged with title, artist, album, track number, genre and composer, with the cover embedded and
+saved next to it as `cover.jpg`. Tracks already in the archive, as FLAC, M4A, MP3, Opus, Ogg,
+AIFF or WAV, are skipped. Tracks that were skipped, seeked in or only partly heard are not kept;
+pausing is fine. Off unless the option is given.
+
+The directory must be writable by the service's user, `raumfeld-airplay`:
+
+```bash
+sudo install -d -o raumfeld-airplay -m 2775 /srv/music-archive
+```
+
+How it finds where tracks begin: AirPlay doesn't mark that in the audio, but the sender's
+now-playing record says when the current track started and how long it is. Measured on real
+speakers, that start fell into the silence between tracks every time. On gapless albums a cut
+can be off by up to half a second.
+
+The files hold exactly the audio that arrived, without a further loss. For a streaming service
+that is its compressed stream, decoded, so they are not lossless copies of the original
+recording. Keeping copies of tracks from a subscription service may be against its terms.
 
 ## Looking at it
 

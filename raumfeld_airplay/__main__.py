@@ -47,6 +47,8 @@ def parse(arguments: list[str] | None = None) -> tuple[Settings, bool]:
     add("--discover-interval", type=float, default=defaults.discover_interval, help="seconds between looks at the rooms")
     add("--title", default=defaults.title, help="what the speakers show as playing")
     add("--format", default=defaults.format, choices=sorted(streaming.FORMATS), help="what the speakers are sent")
+    add("--archive", default=defaults.archive, metavar="DIRECTORY",
+        help="archive every track heard whole as DIRECTORY/artist/album/NN title.flac, skipping those there already")
     parser.add_argument("--version", action="version", version=__version__)
     add("--verbose", action="store_true",
         help="also log routine events: sender reports, volume steps, listeners, audio statistics")

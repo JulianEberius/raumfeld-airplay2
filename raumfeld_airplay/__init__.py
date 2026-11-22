@@ -8,6 +8,7 @@
     shairport  shairport-sync: configuration, metadata feed, remote control
     streaming  PCM to FLAC or MP3 over HTTP
     store      what is kept between runs
+    archive    complete tracks as tagged files, if asked for
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"

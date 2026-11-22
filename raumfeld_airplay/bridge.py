@@ -18,7 +18,7 @@ import time
 import urllib.parse
 from dataclasses import dataclass
 
-from . import shairport, streaming
+from . import archive, shairport, streaming
 from .model import Sink, plan_zones
 from .raumfeld import HOST_PORT, RaumfeldHost, Room, discover_host
 from .store import Identity, Store
@@ -51,6 +51,7 @@ class Settings:
     discover_interval: float = 10.0  # seconds between looks at the rooms
     title: str = "AirPlay"          # what the speakers show as playing
     format: str = "mp3"             # what the speakers are sent: one of streaming.FORMATS
+    archive: str = ""               # where complete tracks are archived as files; none if empty
 
 
 class LiveSink(Sink):
@@ -74,6 +75,8 @@ class LiveSink(Sink):
         self.renamed = False        # its shairport-sync was stopped to take the room's new name
         self.flushed = True         # the encoder holds no leftover audio from before a pause
         self.stats = {"bytes": 0, "peak": 0}
+        self.recorder: archive.Recorder | None = None   # if the bridge archives what plays
+        self.track_due = 0.0        # when to read the sender's now-playing record next (monotonic); 0: no need
 
 
 class Zone:
@@ -104,6 +107,7 @@ class Bridge:
         self.lock = asyncio.Lock()                      # held while zones are rearranged
         self.retry_after = 0.0                          # no new attempt before this time, after a failed one
         self.stats_since = time.monotonic()
+        self.archiving: set[str] = set()                # tracks being archived, by any speaker
 
     # ------------------------------------------------------------ audio and metadata in
 
@@ -130,6 +134,8 @@ class Bridge:
             if samples:
                 sink.stats["peak"] = max(sink.stats["peak"], max(samples), -min(samples))
         self.feed(sink, data)
+        if sink.recorder:
+            sink.recorder.audio(data, time.time())
 
     def on_metadata(self, fd: int, sink: LiveSink) -> None:
         try:
@@ -139,6 +145,12 @@ class Bridge:
         for code, value in sink.metadata.feed(data):
             log.debug("%s: sender reports %s %s", sink.id, shairport.REPORTS[code], value[:60])
             sink.sender_report(code, value, time.monotonic())
+            if sink.recorder:
+                if code == "pend":
+                    sink.recorder.stop()
+                elif code in ("minm", "pbeg", "pres"):
+                    # The sender has a new now-playing record, with the timing the archive cuts by.
+                    sink.track_due = time.monotonic() + 0.3
 
     def feed(self, sink: LiveSink, pcm: bytes) -> None:
         """PCM on its way to the sink's listeners, through its encoder."""
@@ -260,10 +272,14 @@ class Bridge:
             sink.fds.append(fd)
             loop.add_reader(fd, handler, fd, sink)
         sink.tasks = [asyncio.ensure_future(self.run_encoder(sink)), asyncio.ensure_future(self.run_shairport(sink))]
+        if self.settings.archive:
+            sink.recorder = archive.Recorder(self.settings.archive, archive.FileWriter, self.archiving)
         self.sinks[sink.id] = sink
         log.info("%s: AirPlay speaker %r added (port %d)", sink.id, room.name, sink.port)
 
     def remove_sink(self, sink: LiveSink) -> None:
+        if sink.recorder:
+            sink.recorder.stop()
         for task in sink.tasks:
             task.cancel()
         for process in (sink.process, sink.encoder):
@@ -496,6 +512,36 @@ class Bridge:
             except Exception as error:
                 log.error("couldn't set the volume: %s", error)
 
+    async def read_track(self, sink: LiveSink) -> None:
+        """Passes the sender's now-playing record on to the sink's archive recorder."""
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *archive.now_playing_command(sink.id), stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+            output, _ = await asyncio.wait_for(process.communicate(), timeout=5)
+        except (OSError, asyncio.TimeoutError) as error:
+            log.debug("%s: can't read the now-playing record: %s", sink.id, error)
+            return
+        track = archive.parse_now_playing(output)
+        if track and sink.recorder:
+            sink.recorder.record(track)
+
+    async def clean_archive(self) -> None:
+        removed = await asyncio.to_thread(archive.remove_leftovers, self.settings.archive)
+        if removed:
+            log.info("archive: removed %d cut-off recordings", removed)
+
+    def archive_tick(self, now: float) -> None:
+        for sink in self.sinks.values():
+            if not sink.recorder:
+                continue
+            playing = now - sink.last_audio < 1.0
+            if sink.track_due and now >= sink.track_due or playing and not sink.track_due:
+                # As reported, and every 5 seconds while audio flows, in case a report was missed.
+                sink.track_due = now + 5.0 if playing else 0.0
+                asyncio.ensure_future(self.read_track(sink))
+            if not playing and now - sink.last_audio < 3.0:
+                sink.recorder.idle()
+
     async def remote(self, sink: LiveSink, method: str, *arguments: str) -> None:
         """Sends a remote-control command back to the sink's sender."""
         try:
@@ -590,6 +636,7 @@ class Bridge:
             if now - self.stats_since >= 5:
                 self.log_statistics(now)
             await self.reconcile(now)
+            self.archive_tick(now)
             for sink in [sink for sink in self.sinks.values() if sink.gone]:
                 if not any(sink.id in zone.key for zone in self.zones.values()):
                     self.remove_sink(sink)
@@ -615,6 +662,8 @@ class Bridge:
         async with server:
             if self.settings.nqptp:
                 asyncio.ensure_future(self.run_nqptp())
+            if self.settings.archive:
+                asyncio.ensure_future(self.clean_archive())
             asyncio.ensure_future(self.discover())
             asyncio.ensure_future(self.observe())
             await self.supervise()
