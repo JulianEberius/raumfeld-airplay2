@@ -28,6 +28,7 @@ from .upnp import PAUSED_STATE, PLAYING_STATES, STOPPED_STATES, Renderer
 log = logging.getLogger("raumfeld-airplay")
 
 LOCAL_ADDRESSES = ("127.0.0.1", "::1")
+SPEAKERS_SETTLE = 10.0   # how long speakers told to play may report being stopped before they start
 NO_CONTENT = b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n"
 NOT_FOUND = b"HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"
 
@@ -72,6 +73,8 @@ class LiveSink(Sink):
         self.tasks: list[asyncio.Task[None]] = []
         self.fds: list[int] = []
         self.listeners: set[Listener] = set()
+        self.recent = streaming.RecentStream()   # the stream's last seconds, a head start for new listeners
+        self.listener_ended: tuple[float, str, int, str] | None = None   # when, who, bytes sent, how
         self.renamed = False        # its shairport-sync was stopped to take the room's new name
         self.flushed = True         # the encoder holds no leftover audio from before a pause
         self.stats = {"bytes": 0, "peak": 0}
@@ -89,6 +92,8 @@ class Zone:
         self.url = url
         self.restart = False          # the speakers stopped fetching or playing the stream
         self.speaker_state: str | None = None   # the transport state the speakers last reported
+        self.started = time.monotonic()
+        self.speakers_played = False  # whether the speakers have reported playing the stream yet
         self.last_listener = time.monotonic()
         self.located_at = time.monotonic()      # when the rooms' whereabouts were last checked
         self.strays: set[str] = set()           # sinks whose rooms weren't with the zone at that check
@@ -158,6 +163,7 @@ class Bridge:
             sink.encoder.stdin.write(pcm)
 
     def broadcast(self, sink: LiveSink, data: bytes) -> None:
+        sink.recent.add(data, time.monotonic())
         for listener in list(sink.listeners):
             if not listener.offer(data, sink.stream_header):
                 log.warning("%s: listener %s stopped reading; dropping it", sink.id, listener.peer)
@@ -174,6 +180,7 @@ class Bridge:
                 *streaming.encoder_command(self.format), stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE)
             assert sink.encoder.stdout
             sink.stream_header, beginning = b"", b""
+            sink.recent.clear()   # begins with another header
             # Large reads, so that what is passed on begins where the encoder began a frame.
             while data := await sink.encoder.stdout.read(65536):
                 if self.format.has_header and not sink.stream_header:
@@ -235,7 +242,10 @@ class Bridge:
         if not playing and not self.lock.locked() and sink.play_key_pressed(time.monotonic()):
             log.info("%s: play pressed on the speakers; asking the sender to play", sink.id)
             asyncio.ensure_future(self.remote(sink, "Play"))
+        for chunk in sink.recent.since(time.monotonic()):
+            listener.offer(chunk, sink.stream_header)
         sink.listeners.add(listener)
+        how = "ended by the bridge"
         try:
             while (data := await listener.queue.get()) is not None:
                 listener.queued -= len(data)
@@ -244,14 +254,28 @@ class Bridge:
                 writer.write(data)
                 await writer.drain()
                 listener.sent += len(data)
-        except ConnectionError:
-            pass
+                listener.last_sent = time.monotonic()
+        except ConnectionError as error:
+            how = f"closed by the speakers ({error.__class__.__name__})"
         finally:
+            sink.listener_ended = (time.monotonic(), peer, listener.sent, how)
             sink.listeners.discard(listener)
             for zone in self.zones.values():
                 if zone.leader == sink.id:
                     zone.last_listener = time.monotonic()
             log.debug("%s: listener gone: %s after %d bytes", sink.id, peer, listener.sent)
+
+    def describe_listeners(self, sink: LiveSink, now: float) -> str:
+        """How the speakers' connections for the sink's stream are doing, for the log."""
+        per_second = self.format.bytes_per_second
+        if sink.listeners:
+            return "; ".join(f"{listener.peer} connected for {now - listener.connected:.0f} s, "
+                             f"{listener.queued / per_second:.1f} s behind, last took data {now - listener.last_sent:.1f} s ago"
+                             for listener in sink.listeners)
+        if sink.listener_ended:
+            at, peer, sent, how = sink.listener_ended
+            return f"no connection; {peer}'s ended {now - at:.1f} s ago after {sent} bytes, {how}"
+        return "no connection"
 
     def status(self) -> str:
         now = time.monotonic()
@@ -606,10 +630,14 @@ class Bridge:
                 log.info("%s: pause pressed on the speakers; asking the sender to pause", leader.id)
                 asyncio.ensure_future(self.remote(leader, "Pause"))
             zone.speaker_state = state
-        if state in STOPPED_STATES and now - leader.last_audio < 0.15:
+        zone.speakers_played = zone.speakers_played or state in PLAYING_STATES
+        # Speakers that have just been told to play, as when waking from standby, report being
+        # stopped until they start: restarting them then would only start them over and over.
+        settling = not zone.speakers_played and now - zone.started < SPEAKERS_SETTLE
+        if state in STOPPED_STATES and now - leader.last_audio < 0.15 and not settling:
             # The speakers dropped the stream (the bridge restarted, a network hiccup) while the
             # audio keeps coming: play it again.
-            log.warning("the speakers stopped playing %s's stream", leader.id)
+            log.warning("the speakers stopped playing %s's stream (%s)", leader.id, self.describe_listeners(leader, now))
             zone.restart, zone.speaker_state = True, None
         for ident, volume in volumes.items():
             airplay = self.sinks[ident].speakers_report_volume(volume, now, self.settings.max_volume)
@@ -652,7 +680,7 @@ class Bridge:
                     self.feed(leader, gap_filler)   # keeps the speakers' stream alive until the audio arrives
                 elif idle < 0.15 and not leader.listeners and now - zone.last_listener > 15:
                     # Audio is coming in but the speakers aren't fetching it (any more): start over.
-                    log.warning("the speakers aren't fetching %s's stream", leader.id)
+                    log.warning("the speakers aren't fetching %s's stream (%s)", leader.id, self.describe_listeners(leader, now))
                     zone.restart, zone.last_listener = True, now
 
     async def run(self) -> None:

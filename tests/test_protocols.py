@@ -215,6 +215,31 @@ class Streaming(unittest.TestCase):
         self.assertIsNone(listener.queue.get_nowait(), "told to hang up")
 
 
+class HeadStart(unittest.TestCase):
+    def test_a_new_speaker_gets_the_last_seconds_of_the_stream(self) -> None:
+        recent = streaming.RecentStream(2.0)
+        for second in range(5):
+            recent.add(bytes([second]), 100.0 + second)
+        self.assertEqual(recent.since(104.5), [b"\x03", b"\x04"])
+
+    def test_nothing_when_the_stream_has_been_quiet(self) -> None:
+        recent = streaming.RecentStream(2.0)
+        recent.add(b"before the pause", 100.0)
+        self.assertEqual(recent.since(160.0), [])
+
+    def test_it_starts_where_a_flac_frame_does(self) -> None:
+        fmt = streaming.FORMATS["flac"]
+        listener = streaming.Listener("speaker", fmt)
+        recent = streaming.RecentStream(2.0)
+        frame = streaming.FLAC_FRAME_SYNC + b"frame"
+        for at, data in ((1.0, b"middle of a frame"), (1.5, frame), (1.9, b"more")):
+            recent.add(data, at)
+        for data in recent.since(2.0):
+            listener.offer(data, b"fLaC header")
+        self.assertEqual(listener.queue.get_nowait(), b"fLaC header" + frame)
+        self.assertEqual(listener.queue.get_nowait(), b"more")
+
+
 class Flac(unittest.TestCase):
     # "fLaC", a STREAMINFO block (type 0, 34 bytes) and a last block (type 4 with the last-flag, 8 bytes)
     HEADER = b"fLaC" + b"\x00\x00\x00\x22" + bytes(34) + b"\x84\x00\x00\x08" + bytes(8)

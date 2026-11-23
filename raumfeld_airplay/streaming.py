@@ -5,11 +5,14 @@ stream that the Raumfeld host fetches over HTTP like an internet radio station."
 from __future__ import annotations
 
 import asyncio
+import time
+from collections import deque
 from dataclasses import dataclass
 
 RATE, CHANNELS, BITS = 44100, 2, 16
 PCM_BYTES_PER_SECOND = RATE * CHANNELS * BITS // 8
 BACKLOG_SECONDS = 6   # how far a listener may fall behind before it counts as stalled
+HEAD_START = 2.0      # seconds of the stream a speaker is sent at once when it connects
 
 
 @dataclass(frozen=True)
@@ -133,6 +136,8 @@ class Listener:
         self.queued = 0   # bytes waiting to be sent
         self.sent = 0
         self.started = not fmt.has_header   # whether it has been sent the stream's header, if there is one
+        self.connected = time.monotonic()
+        self.last_sent = self.connected     # when it last took data
         self._limit = BACKLOG_SECONDS * fmt.bytes_per_second
 
     def offer(self, data: bytes, header: bytes = b"") -> bool:
@@ -156,3 +161,25 @@ class Listener:
             self.queue.get_nowait()
         self.queued = 0
         self.queue.put_nowait(None)
+
+
+class RecentStream:
+    """The last few seconds of a stream, given to a speaker as a head start when it connects:
+    the stream is live, so without one a speaker's buffer holds only what it waited for before
+    starting, and a short network stall empties it. It plays that much later than the sender."""
+
+    def __init__(self, seconds: float = HEAD_START) -> None:
+        self.seconds = seconds
+        self._chunks: deque[tuple[float, bytes]] = deque()
+
+    def add(self, data: bytes, now: float) -> None:
+        self._chunks.append((now, data))
+        while self._chunks and self._chunks[0][0] < now - self.seconds:
+            self._chunks.popleft()
+
+    def since(self, now: float) -> list[bytes]:
+        """What arrived within the last few seconds, oldest first."""
+        return [data for at, data in self._chunks if at >= now - self.seconds]
+
+    def clear(self) -> None:
+        self._chunks.clear()

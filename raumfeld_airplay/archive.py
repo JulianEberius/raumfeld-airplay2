@@ -387,6 +387,19 @@ def make_directories(path: str) -> None:
         os.umask(previous)
 
 
+def claim_file(path: str) -> None:
+    """Creates the folders for `path` and an empty file there. The file keeps the folders from
+    being removed as empty by a recording of the same album that was dropped meanwhile."""
+    for attempt in range(3):
+        make_directories(os.path.dirname(path))
+        try:
+            with open(path, "wb"):
+                return
+        except FileNotFoundError:
+            if attempt == 2:
+                raise
+
+
 def save_cover(track: Track, directory: str) -> str | None:
     """The album's cover file, saved next to its tracks from what shairport-sync received."""
     for name in ("cover.jpg", "cover.png"):
@@ -423,7 +436,7 @@ class FileWriter:
         self.started = asyncio.ensure_future(self._start())
 
     async def _start(self) -> None:
-        make_directories(self.directory)
+        claim_file(self.recording)
         self.process = await asyncio.create_subprocess_exec(
             *encoder_command(self.recording), stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)

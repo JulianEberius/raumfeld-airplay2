@@ -222,6 +222,18 @@ class Files(unittest.TestCase):
             if os.uname().sysname == "Linux":   # BSD folders always take their parent's group
                 self.assertTrue(mode & stat.S_ISGID)
 
+    def test_a_new_recording_keeps_its_folder_from_a_dropped_one_s_cleanup(self) -> None:
+        # A take of the album was dropped just as the next one started: its cleanup removes the
+        # album's folder if empty, which must not pull the folder from under the new recording.
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as base:
+            album = os.path.join(base, "Ezra Collective", "Here Because of Hope")
+            recording = os.path.join(album, ".01 Part 1.flac.part")
+            archive.claim_file(recording)
+            self.assertTrue(os.path.isfile(recording))
+            with self.assertRaises(OSError):
+                os.rmdir(album)
+
     def test_cut_off_recordings_are_cleaned_up(self) -> None:
         import os, tempfile
         with tempfile.TemporaryDirectory() as base:
