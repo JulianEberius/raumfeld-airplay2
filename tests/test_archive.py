@@ -228,7 +228,7 @@ class Files(unittest.TestCase):
         import os, tempfile
         with tempfile.TemporaryDirectory() as base:
             album = os.path.join(base, "Ezra Collective", "Here Because of Hope")
-            recording = os.path.join(album, ".01 Part 1.flac.part")
+            recording = os.path.join(album, ".01 Part 1.m4a.part")
             archive.claim_file(recording)
             self.assertTrue(os.path.isfile(recording))
             with self.assertRaises(OSError):
@@ -239,10 +239,10 @@ class Files(unittest.TestCase):
         with tempfile.TemporaryDirectory() as base:
             album = os.path.join(base, "Asaf Avidan", "Unfurl")
             os.makedirs(album)
-            for name in (".02 Unfurling Dream.flac.part", ".03 X.flac.tagged", "01 Intro.flac", "cover.jpg"):
+            for name in (".02 Unfurling Dream.m4a.part", ".03 X.m4a.tagged", ".04 Old.flac.part", "01 Intro.m4a", "cover.jpg"):
                 open(os.path.join(album, name), "w").close()
-            self.assertEqual(archive.remove_leftovers(base), 2)
-            self.assertEqual(sorted(os.listdir(album)), ["01 Intro.flac", "cover.jpg"])
+            self.assertEqual(archive.remove_leftovers(base), 3)
+            self.assertEqual(sorted(os.listdir(album)), ["01 Intro.m4a", "cover.jpg"])
 
     def test_names_are_safe_everywhere(self) -> None:
         self.assertEqual(archive.clean("AC/DC", "x"), "AC-DC")
@@ -258,12 +258,14 @@ class Files(unittest.TestCase):
 
     def test_tags_and_cover_go_into_the_file(self) -> None:
         t = Track(key="k", title="Sweet Echo", artist="Ezra Collective", album="Here Because of Hope", number=3)
-        command = archive.tagging_command("in.part", t, "cover.jpg", "out.flac")
+        command = archive.tagging_command("in.part", t, "cover.jpg", "out.m4a")
+        self.assertEqual(command[command.index("-c:a") + 1], "alac")
+        self.assertEqual(command[-3:], ["-f", "ipod", "out.m4a"])
         self.assertIn("title=Sweet Echo", command)
         self.assertIn("track=3", command)
         self.assertNotIn("genre=", " ".join(command))
         self.assertEqual(command[command.index("-disposition:v") + 1], "attached_pic")
-        self.assertNotIn("-disposition:v", archive.tagging_command("in.part", t, None, "out.flac"))
+        self.assertNotIn("-disposition:v", archive.tagging_command("in.part", t, None, "out.m4a"))
 
 
 if __name__ == "__main__":

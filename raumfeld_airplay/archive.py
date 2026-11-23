@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """A private archive of what plays: every track heard from start to end is written to its own
-FLAC file, tagged and with its cover, as BASE/artist/album/NN title.flac. Tracks that are in
+ALAC file, tagged and with its cover, as BASE/artist/album/NN title.m4a. Tracks that are in
 the archive already, in any common format, are skipped.
 
 AirPlay doesn't mark in the audio where a track begins. The sender's now-playing record says
@@ -13,9 +13,11 @@ next track's start.
 A track is kept only if it was heard whole: from its first two seconds to its last two, with
 no seek in between. Pausing is fine. Skipped and seeked tracks are thrown away.
 
-FLAC because it adds no loss of its own: the file holds exactly the samples that arrived. They
-are the sender's stream decoded, which for Apple Music is AAC, so the file is not lossless
-relative to the original recording.
+ALAC (Apple Lossless) because it adds no loss of its own, so the file holds exactly the samples
+that arrived, and because the Music app on a Mac or an iPhone takes it, which it doesn't FLAC.
+The samples are the sender's stream decoded, which for Apple Music is AAC, so the file is not
+lossless relative to the original recording. While a track plays it is recorded as FLAC, which
+stays readable when cut off; it becomes ALAC when it is kept.
 """
 
 from __future__ import annotations
@@ -36,7 +38,8 @@ from .streaming import CHANNELS, PCM_BYTES_PER_SECOND, RATE
 
 log = logging.getLogger("raumfeld-airplay")
 
-EXTENSION = ".flac"
+EXTENSION = ".m4a"
+RECORDING_EXTENSIONS = (".m4a", ".flac")   # of hidden recordings; .flac: from before ALAC
 # A track in any of these formats counts as archived already.
 ARCHIVED_EXTENSIONS = (".flac", ".m4a", ".m4p", ".alac", ".mp3", ".opus", ".ogg", ".aiff", ".aif", ".wav")
 START_TOLERANCE = 2.0    # seconds of a track's beginning that may be missing from a recording
@@ -150,19 +153,19 @@ def encoder_command(output: str) -> list[str]:
 
 
 def tagging_command(source: str, track: Track, cover: str | None, output: str) -> list[str]:
-    """ffmpeg copying the recorded audio into the track's file, with its tags and cover."""
+    """ffmpeg turning the recorded audio into the track's ALAC file, with its tags and cover."""
     command = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", source]
     if cover:
         command += ["-i", cover]
-    command += ["-map", "0:a", "-c:a", "copy"]
+    command += ["-map", "0:a", "-c:a", "alac"]
     if cover:
-        command += ["-map", "1:v", "-c:v", "copy", "-disposition:v", "attached_pic", "-metadata:s:v", "comment=Cover (front)"]
+        command += ["-map", "1:v", "-c:v", "copy", "-disposition:v", "attached_pic"]
     tags = {"title": track.title, "artist": track.artist, "album": track.album, "genre": track.genre,
             "composer": track.composer, "track": str(track.number) if track.number else ""}
     for name, value in tags.items():
         if value:
             command += ["-metadata", f"{name}={value}"]
-    return command + ["-f", "flac", output]
+    return command + ["-f", "ipod", output]
 
 
 # ---------------------------------------------------------------- cutting the audio into tracks
@@ -503,7 +506,8 @@ def remove_leftovers(base: str) -> int:
     removed = 0
     for directory, _, names in os.walk(base):
         for name in names:
-            if name.startswith(".") and name.endswith((EXTENSION + ".part", EXTENSION + ".tagged")):
+            if name.startswith(".") and name.endswith(tuple(extension + leftover for extension in RECORDING_EXTENSIONS
+                                                            for leftover in (".part", ".tagged"))):
                 try:
                     os.remove(os.path.join(directory, name))
                     removed += 1

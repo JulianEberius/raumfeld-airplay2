@@ -85,12 +85,13 @@ With `--archive DIRECTORY` the bridge also keeps a private archive of what plays
 heard from start to end is written to
 
 ```
-DIRECTORY/Artist/Album/NN Title.flac
+DIRECTORY/Artist/Album/NN Title.m4a
 ```
 
-tagged with title, artist, album, track number, genre and composer, with the cover embedded and
-saved next to it as `cover.jpg`. Tracks already in the archive, as FLAC, M4A (also protected
-M4P from old iTunes purchases), MP3, Opus, Ogg, AIFF or WAV, are skipped. The layout is the one
+as Apple Lossless (ALAC), which the Music app on a Mac or an iPhone plays, tagged with title,
+artist, album, track number, genre and composer, with the cover embedded and saved next to it
+as `cover.jpg`. Tracks already in the archive, as M4A (also protected M4P from old iTunes
+purchases), FLAC, MP3, Opus, Ogg, AIFF or WAV, are skipped. The layout is the one
 the Music app and iTunes use for their folders, so the archive can share a folder with a library
 exported from them. Tracks that were skipped, seeked in or only partly heard are not kept;
 pausing is fine. Off unless the option is given.
