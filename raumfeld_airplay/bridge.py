@@ -434,6 +434,15 @@ class Bridge:
         host = self.connect()
         sinks = [self.sinks[ident] for ident in sorted(key)]
         renderer = host.renderer(host.ensure_zone(sink.room_udn for sink in sinks))
+        rooms = host.zone_config().rooms()
+        for sink in sinks:
+            room = rooms.get(sink.room_udn)
+            if room and room.power_state and room.power_state != "ACTIVE":
+                log.info("waking %s (%s)", sink.room_name, room.power_state.lower().replace("_", " "))
+                try:
+                    renderer.leave_standby(sink.room_udn)
+                except Exception as error:
+                    log.warning("couldn't wake %s: %s", sink.room_name, error)
         url = f"http://{self.own_ip}:{self.settings.port}{self.sinks[leader].path}"
         for sink in sinks:
             if sink.volume is not None:

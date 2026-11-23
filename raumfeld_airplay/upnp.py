@@ -107,6 +107,11 @@ class Renderer:
                   CurrentURIMetaData=stream_didl(url, title, protocol_info))
         self.call(AV_TRANSPORT, "Play", InstanceID=0, Speed=1)
 
+    def leave_standby(self, room_udn: str) -> None:
+        """Wakes the zone's room, as the Raumfeld app does. Speakers in standby don't always wake
+        when told to play."""
+        self.call(AV_TRANSPORT, "LeaveStandby", InstanceID=0, Room=room_udn)
+
     def stop(self) -> None:
         self.call(AV_TRANSPORT, "Stop", InstanceID=0)
 

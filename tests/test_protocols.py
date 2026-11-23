@@ -146,6 +146,22 @@ class UPnP(unittest.TestCase):
         self.assertEqual(headers["SOAPACTION"], '"urn:schemas-upnp-org:service:RenderingControl:1#GetRoomVolume"')
         self.assertIn(b"<InstanceID>0</InstanceID><Room>uuid:kitchen</Room>", body)
 
+    def test_waking_a_room(self) -> None:
+        sent: list[tuple[str, bytes, dict[str, str]]] = []
+
+        def post(url: str, body: bytes, headers: dict[str, str]) -> bytes:
+            sent.append((url, body, headers))
+            return (b'<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body>'
+                    b'<u:LeaveStandbyResponse xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"/>'
+                    b'</s:Body></s:Envelope>')
+
+        renderer = upnp.Renderer("http://192.168.0.65:50690/zone-1.xml", fetch=lambda url: DESCRIPTION, post=post)
+        renderer.leave_standby("uuid:living")
+        url, body, headers = sent[0]
+        self.assertEqual(url, "http://192.168.0.65:50690/TransportService/Control")
+        self.assertEqual(headers["SOAPACTION"], '"urn:schemas-upnp-org:service:AVTransport:1#LeaveStandby"')
+        self.assertIn(b"<InstanceID>0</InstanceID><Room>uuid:living</Room>", body)
+
     def test_stream_metadata_escapes(self) -> None:
         didl = upnp.stream_didl("http://pi:8090/stream/a.mp3?x=1&y=2", "Rock & Roll", streaming.MP3.protocol_info)
         self.assertIn("Rock &amp; Roll", didl)
