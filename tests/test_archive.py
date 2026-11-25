@@ -228,7 +228,7 @@ class Files(unittest.TestCase):
         import os, tempfile
         with tempfile.TemporaryDirectory() as base:
             album = os.path.join(base, "Ezra Collective", "Here Because of Hope")
-            recording = os.path.join(album, ".01 Part 1.m4a.part")
+            recording = os.path.join(album, ".01 Part 1.flac.part")
             archive.claim_file(recording)
             self.assertTrue(os.path.isfile(recording))
             with self.assertRaises(OSError):
@@ -239,7 +239,7 @@ class Files(unittest.TestCase):
         with tempfile.TemporaryDirectory() as base:
             album = os.path.join(base, "Asaf Avidan", "Unfurl")
             os.makedirs(album)
-            for name in (".02 Unfurling Dream.m4a.part", ".03 X.m4a.tagged", ".04 Old.flac.part", "01 Intro.m4a", "cover.jpg"):
+            for name in (".02 Unfurling Dream.flac.part", ".03 X.m4a.tagged", ".04 Old.m4a.part", "01 Intro.m4a", "cover.jpg"):
                 open(os.path.join(album, name), "w").close()
             self.assertEqual(archive.remove_leftovers(base), 3)
             self.assertEqual(sorted(os.listdir(album)), ["01 Intro.m4a", "cover.jpg"])

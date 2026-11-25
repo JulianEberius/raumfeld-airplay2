@@ -15,9 +15,9 @@ no seek in between. Pausing is fine. Skipped and seeked tracks are thrown away.
 
 ALAC (Apple Lossless) because it adds no loss of its own, so the file holds exactly the samples
 that arrived, and because the Music app on a Mac or an iPhone takes it, which it doesn't FLAC.
-The samples are the sender's stream decoded, which for Apple Music is AAC, so the file is not
-lossless relative to the original recording. While a track plays it is recorded as FLAC, which
-stays readable when cut off; it becomes ALAC when it is kept.
+The samples are the sender's stream decoded, which for a streaming service is usually lossy, so
+the file is not lossless relative to the original recording. While a track plays it is recorded
+to a hidden FLAC file, which stays readable when cut off; it becomes ALAC when it is kept.
 """
 
 from __future__ import annotations
@@ -39,7 +39,8 @@ from .streaming import CHANNELS, PCM_BYTES_PER_SECOND, RATE
 log = logging.getLogger("raumfeld-airplay")
 
 EXTENSION = ".m4a"
-RECORDING_EXTENSIONS = (".m4a", ".flac")   # of hidden recordings; .flac: from before ALAC
+RECORDING = ".flac"   # what a track is recorded as while it plays
+RECORDING_EXTENSIONS = (".flac", ".m4a")   # of hidden files left over: .flac.part, .m4a.tagged; .m4a.part: older
 # A track in any of these formats counts as archived already.
 ARCHIVED_EXTENSIONS = (".flac", ".m4a", ".m4p", ".alac", ".mp3", ".opus", ".ogg", ".aiff", ".aif", ".wav")
 START_TOLERANCE = 2.0    # seconds of a track's beginning that may be missing from a recording
@@ -432,7 +433,7 @@ class FileWriter:
     def __init__(self, stem: str) -> None:
         self.directory, name = os.path.split(stem)
         self.final = stem + EXTENSION
-        self.recording = os.path.join(self.directory, f".{name}{EXTENSION}.part")
+        self.recording = os.path.join(self.directory, f".{name}{RECORDING}.part")
         self.tagged = os.path.join(self.directory, f".{name}{EXTENSION}.tagged")
         self.process: asyncio.subprocess.Process | None = None
         self.pending: list[bytes] = []
